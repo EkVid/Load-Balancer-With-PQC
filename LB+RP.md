@@ -22,6 +22,9 @@ This project will design and implement a **reverse proxy and load balancer** usi
 - **Configuration Management:**
   - Load configuration (e.g., backends, ports, strategies) from an external JSON file.
   - Support runtime configuration reload without restarting the proxy.
+---
+
+### (Optional Objectives)
 - **Reliability & Resilience:**
   - Implement retry and failover logic when a backend fails.
   - Ensure graceful shutdown and recovery mechanisms
