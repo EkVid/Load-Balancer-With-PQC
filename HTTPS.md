@@ -9,8 +9,7 @@ This project will design and implement a **HTTPS protocol** in **C++**, includin
 
 ### Core Objectives
 - **TCP Secure Layer:**
-  - Implement TCP-based client-server communication.
-  - Handle handshake, session establishment, and message framing.
+  - Implement TCP-based client-server communication through sockets.
 - **TLS-like Handshake:**
   - Implement a handshake protocol similar to TLS 1.3.
   - Support certificate exchange, authentication, and key derivation.
@@ -25,13 +24,14 @@ This project will design and implement a **HTTPS protocol** in **C++**, includin
   - Use asynchronous I/O or multi-threaded design for handling multiple concurrent secure sessions.
 - **Observability & Logging:**
   - Log handshake details, encryption usage, and session statistics.
+- **Client Connectivity to HTTPS
+  - Client should be able to connect to all HTTPS website on the web, not just our server.
+  - Client shoud be able to authenticate the certificates sent by the server using Certificate Authority (CA)
 
 ### Advanced Features
 - Post-quantum certificate validation.
 - Session resumption (like TLS session tickets).
 - Secure renegotiation for long-lived connections.
-- Metrics and monitoring endpoint for active secure sessions.
-
 ---
 
 ## Team Roles & Responsibilities
