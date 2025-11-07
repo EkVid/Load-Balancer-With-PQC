@@ -89,3 +89,7 @@ This project will design and implement a **reverse proxy and load balancer** usi
 - Designing meaningful observability and monitoring for system performance.
 
 ---
+
+
+**USeful resources:**
+- https://medium.com/@dinesharney/load-balancer-vs-reverse-proxy-vs-api-gateway-understanding-the-modern-web-traffic-managers-409ce280a256
