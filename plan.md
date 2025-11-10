@@ -1,187 +1,225 @@
+⚙️ 1. Core Features
+✅ Reverse Proxy Functionality
 
-- The client sends a request to the proxy instead of directly to the server.  
-- The proxy forwards it to one of several backend servers.  
-- The proxy returns the backend’s response to the client.
+Goal: Accept client requests, forward to backend, and return responses transparently.
 
-When multiple backends are involved, it can also **balance the load** using strategies like:
-- Round Robin
-- Random
-- Least Connections
-- Weighted Distribution
+Strategies:
 
----
+Use Go’s net/http for the frontend listener.
 
-## Why Go Makes This Easy
+Use httputil.ReverseProxy or implement your own forwarding logic with http.Client.
 
-Go’s standard library (`net/http` and `net/http/httputil`) already includes:
-- `http.Server` — for handling incoming client requests  
-- `httputil.ReverseProxy` — for forwarding requests to backends  
+Preserve headers like X-Forwarded-For and X-Real-IP.
 
-This means you don’t need to reinvent the HTTP stack.  
-You can focus on **routing logic**, **health checks**, and **resilience**.
+Handle both HTTP and HTTPS (TLS termination can come later).
 
----
+✅ Load Balancing
 
-## The Simplest Reverse Proxy in Go
+Goal: Distribute incoming requests evenly (or intelligently) across multiple backend servers.
 
-Let’s start small — a reverse proxy that forwards all traffic to a single backend.
+Common Strategies:
 
-```go
-package main
+Round Robin: Rotate through the backend list sequentially.
 
-import (
-	"net/http"
-	"net/http/httputil"
-	"net/url"
-)
+Easy to implement and fair in most cases.
 
-func main() {
-	target, _ := url.Parse("http://localhost:8081")
-	proxy := httputil.NewSingleHostReverseProxy(target)
+Random: Choose a backend at random.
 
-	http.ListenAndServe(":8080", proxy)
-}
+Simple and stateless.
 
----
-## Add Load Balancing to scale to multiple backend servers
+Least Connections: Track how many connections each backend currently handles; send new requests to the least busy one.
 
-package main
+Requires per-backend connection state.
 
-import (
-	"log"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
-	"sync/atomic"
-)
+IP Hashing: Consistent hashing based on client IP.
 
-type LoadBalancer struct {
-	backends []*url.URL
-	counter  uint64
-}
+Ensures same client always hits the same backend (useful for sticky sessions).
 
-func (lb *LoadBalancer) getNextBackend() *url.URL {
-	index := atomic.AddUint64(&lb.counter, 1)
-	return lb.backends[index%uint64(len(lb.backends))]
-}
+✅ Health Checking
 
-func (lb *LoadBalancer) handler(w http.ResponseWriter, r *http.Request) {
-	target := lb.getNextBackend()
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ServeHTTP(w, r)
-}
+Goal: Detect unhealthy or offline backends and temporarily remove them from rotation.
 
-func main() {
-	backends := []*url.URL{
-		{Scheme: "http", Host: "localhost:8081"},
-		{Scheme: "http", Host: "localhost:8082"},
-		{Scheme: "http", Host: "localhost:8083"},
-	}
+Strategies:
 
-	lb := &LoadBalancer{backends: backends}
+Periodically send lightweight health pings (e.g. HEAD /health or GET /status) to each backend.
 
-	log.Println("Load balancer running on :8080")
-	http.ListenAndServe(":8080", http.HandlerFunc(lb.handler))
-}
+Use goroutines with timers to perform checks concurrently.
 
+Mark a backend as unhealthy after N consecutive failures.
 
----
-## Add health check to avoid sending traffics to dead servers
-package main
+Allow automatic recovery when a backend starts passing checks again.
 
-import (
-	"log"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
-	"sync"
-	"sync/atomic"
-	"time"
-)
+Store health state in a thread-safe structure (like sync.Map or a custom struct with sync.RWMutex).
 
-type Backend struct {
-	URL    *url.URL
-	Alive  bool
-	mu     sync.RWMutex
-	Proxy  *httputil.ReverseProxy
-}
+✅ Connection Management
 
-type LoadBalancer struct {
-	backends []*Backend
-	counter  uint64
-}
+Goal: Efficiently reuse network connections and handle timeouts cleanly.
 
-func (b *Backend) setAlive(alive bool) {
-	b.mu.Lock()
-	b.Alive = alive
-	b.mu.Unlock()
-}
+Strategies:
 
-func (b *Backend) isAlive() bool {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.Alive
-}
+Use a shared http.Transport for all outbound requests.
 
-func (lb *LoadBalancer) getNextBackend() *Backend {
-	length := len(lb.backends)
-	for i := 0; i < length; i++ {
-		index := int(atomic.AddUint64(&lb.counter, 1) % uint64(length))
-		if lb.backends[index].isAlive() {
-			return lb.backends[index]
-		}
-	}
-	return nil
-}
+Configure:
 
-func (lb *LoadBalancer) healthCheck() {
-	for {
-		for _, backend := range lb.backends {
-			resp, err := http.Get(backend.URL.String() + "/health")
-			alive := err == nil && resp.StatusCode == http.StatusOK
-			backend.setAlive(alive)
-			if alive {
-				log.Printf("✔ %s is alive\n", backend.URL)
-			} else {
-				log.Printf("✖ %s is down\n", backend.URL)
-			}
-		}
-		time.Sleep(10 * time.Second)
-	}
-}
+MaxIdleConnsPerHost (for connection reuse).
 
-func (lb *LoadBalancer) handler(w http.ResponseWriter, r *http.Request) {
-	backend := lb.getNextBackend()
-	if backend == nil {
-		http.Error(w, "No healthy backends available", http.StatusServiceUnavailable)
-		return
-	}
-	backend.Proxy.ServeHTTP(w, r)
-}
+ResponseHeaderTimeout and IdleConnTimeout.
 
-func main() {
-	backendURLs := []string{
-		"http://localhost:8081",
-		"http://localhost:8082",
-		"http://localhost:8083",
-	}
+DisableKeepAlives only when necessary.
 
-	var backends []*Backend
-	for _, rawURL := range backendURLs {
-		url, _ := url.Parse(rawURL)
-		backends = append(backends, &Backend{
-			URL:   url,
-			Alive: true,
-			Proxy: httputil.NewSingleHostReverseProxy(url),
-		})
-	}
+Cleanly close idle connections when shutting down.
 
-	lb := &LoadBalancer{backends: backends}
-	go lb.healthCheck()
+🧠 2. Resilience & Fault Tolerance
+✅ Retry Logic
 
-	log.Println("Load balancer started on :8080")
-	http.ListenAndServe(":8080", http.HandlerFunc(lb.handler))
-}
+Goal: Retry requests that fail due to transient errors.
 
+Strategies:
 
+Retry only on idempotent HTTP methods (GET, HEAD, OPTIONS).
 
+Set a retry limit (e.g. 2–3 times) and exponential backoff.
+
+Use circuit breaker pattern to prevent hammering failing servers.
+
+✅ Circuit Breaker
+
+Goal: Prevent continuous traffic to a repeatedly failing backend.
+
+Strategies:
+
+Track consecutive failure counts per backend.
+
+“Trip” the circuit if failures exceed a threshold.
+
+During the open state, skip sending requests to that backend.
+
+After a cooldown period, “half-open” and test with one request before resuming normal operation.
+
+✅ Request Timeouts
+
+Goal: Avoid hanging requests when a backend is slow or unresponsive.
+
+Strategies:
+
+Set:
+
+ReadTimeout and WriteTimeout on the proxy’s http.Server.
+
+Timeout on the outbound http.Client.
+
+Consider total request deadlines using context.WithTimeout.
+
+✅ Graceful Shutdown
+
+Goal: Stop accepting new requests while finishing existing ones.
+
+Strategies:
+
+Use http.Server.Shutdown(ctx) with a timeout context.
+
+Close backend health check goroutines and connection pools gracefully.
+
+🔒 3. Security & Request Handling
+✅ Header Sanitization
+
+Goal: Prevent header injection and ensure clean upstream communication.
+
+Strategies:
+
+Remove hop-by-hop headers (like Connection, Keep-Alive, Proxy-Authorization, etc.) before forwarding.
+
+Append or override X-Forwarded-For and X-Real-IP.
+
+✅ TLS Termination
+
+Goal: Terminate HTTPS traffic at the proxy.
+
+Strategies:
+
+Use http.Server with TLSConfig.
+
+Load certificates via crypto/tls.
+
+Optionally support Let’s Encrypt via autocert.
+
+✅ Request and Response Compression
+
+Goal: Improve performance for large payloads.
+
+Strategies:
+
+Support gzip/deflate compression for client responses.
+
+Ensure you respect Accept-Encoding headers.
+
+✅ Request Buffering / Streaming
+
+Goal: Control memory usage and handle large request bodies.
+
+Strategies:
+
+Stream request bodies instead of buffering them entirely in memory.
+
+Use io.Copy to forward directly from Request.Body to the backend connection.
+
+⚖️ 4. Routing and Configuration
+✅ Dynamic Backend Configuration
+
+Goal: Allow adding/removing backends without restarting the proxy.
+
+Strategies:
+
+Store backend list in a concurrent data structure.
+
+Support reloading via an API endpoint (e.g., POST /admin/reload).
+
+Use a file watcher (fsnotify) to reload JSON/YAML configs automatically.
+
+✅ Path- and Host-Based Routing
+
+Goal: Route requests to different backend pools based on URL path or host.
+
+Strategies:
+
+Maintain routing tables or maps (e.g., /api/* → API backends, /static/* → CDN).
+
+Match patterns using regex or prefix comparison.
+
+Combine with load balancing per route group.
+
+✅ Sticky Sessions
+
+Goal: Keep the same client routed to the same backend.
+
+Strategies:
+
+Use consistent hashing (client IP, session cookie, or header).
+
+Cache client → backend mappings in memory (e.g. map[string]*Backend).
+
+🧩 5. Observability and Debuggability (Optional Internals)
+
+Even though you’re skipping metrics/monitoring, consider adding:
+
+Structured logging (JSON output with timestamps and correlation IDs).
+
+Access logs with request method, path, latency, and backend info.
+
+Debug endpoints (e.g., /debug/backends showing backend health and stats).
+
+🚀 6. Advanced (Optional but Useful)
+Feature	Why it’s Useful	Strategy
+Request Caching	Reduces backend load for repeated GETs	Use in-memory cache (LRU) keyed by URL
+Rate Limiting / Throttling	Prevent abuse and traffic spikes	Token bucket or leaky bucket algorithms
+Request Priority / QoS	Handle VIP clients faster	Assign weighted queues
+HTTP/2 Support	Better multiplexing	Use Go’s built-in HTTP/2 via TLS
+WebSocket Proxying	Real-time connections	Use http.Hijacker or ReverseProxy with Upgrade headers
+Graceful Reloads	Apply config updates without restarting	Swap backend list atomically
+🧱 TL;DR Summary
+Category	Core Focus
+Core Logic	Reverse proxy, load balancing, routing
+Reliability	Health checks, retries, circuit breakers, timeouts
+Security	Header sanitization, TLS, compression
+Flexibility	Dynamic config, path/host-based routing
+Stability	Connection pooling, graceful shutdown
