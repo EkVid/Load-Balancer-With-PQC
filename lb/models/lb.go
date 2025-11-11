@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"time"
 	"sync/atomic"
+	"sync"
 )
 
 // LoadBalancer represents your load balancer
 type LoadBalancer struct {
 	Backends []*Backend // slice of backend servers
 	Counter  uint64     // for round-robin
+	mu sync.RWMutex
 }
 
 // Round-robin
@@ -66,4 +68,41 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 			}
 		}
 	}()
+}
+
+func (lb *LoadBalancer) AddBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	backend, err := CreateBackendServer(rawURL)
+	if err != nil {
+		return err
+	}
+
+    // Check if backend is alive before adding
+    resp, err := http.Get(backend.URL.String())
+    if err != nil || resp.StatusCode >= 400 {
+        backend.SetAlive(false)
+        fmt.Printf("Added backend %s (currently DOWN)\n", rawURL)
+    } else {
+        backend.SetAlive(true)
+        fmt.Printf("Added backend %s (UP)\n", rawURL)
+        resp.Body.Close()
+    }
+
+	lb.Backends = append(lb.Backends, backend)
+	return nil
+}
+
+func (lb *LoadBalancer) RemoveBackend(rawURL string) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for i, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
+			fmt.Printf("Removed backend: %s\n", rawURL)
+			return
+		}
+	}
 }
