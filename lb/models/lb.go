@@ -45,9 +45,12 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 			for _, backend := range lb.Backends {
 				resp, err := http.Get(backend.URL.String())
 				if err != nil || resp.StatusCode >= 400 {
-					fmt.Printf("Server %d is down\n", backend.URL.String())
+					fmt.Printf("Server %s is down\n", backend.URL.String())
 					backend.SetAlive(false)
 				} else {
+					if !backend.IsAlive() {
+						fmt.Printf("Server %s is back up running\n", backend.URL.String())
+					}
 					backend.SetAlive(true)
 					if resp != nil {
 						resp.Body.Close()
