@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"time"
 	"lb/models"
 )
@@ -23,15 +21,11 @@ func main() {
 	// Create backend objects
 	var backends []*models.Backend
 	for _, rawURL := range backendURLs {
-		u, err := url.Parse(rawURL)
+		backend, err := models.CreateBackendServer(rawURL)
 		if err != nil {
 			log.Fatalf("Invalid backend URL %s: %v", rawURL, err)
 		}
-		backends = append(backends, &models.Backend{
-			URL:          u,
-			Alive:        true,
-			ReverseProxy: httputil.NewSingleHostReverseProxy(u),
-		})
+		backends = append(backends, backend)
 	}
 
 	// Create load balancer
