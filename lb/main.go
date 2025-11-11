@@ -8,9 +8,23 @@ import (
 
 	"lb/models"
 	"lb/utils"
+	"lb/server"
 )
 
 func main() {
+	// Start backend servers first
+	start := false
+	if start {
+		numServers := 5
+		startingPort := 8081
+		for i := 0; i < numServers; i++ {
+			port := startingPort + i
+			go server.StartServer(port)
+			time.Sleep(200 * time.Millisecond) // avoid race
+		}
+	}
+
+	
 	// List of backend URLs
 	backendURLs := []string{
 		"http://localhost:8081",
