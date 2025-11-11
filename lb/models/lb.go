@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"sync/atomic"
 )
 
 // LoadBalancer represents your load balancer
