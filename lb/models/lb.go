@@ -7,6 +7,9 @@ import (
 	"time"
 	"sync/atomic"
 	"sync"
+	"strconv"
+
+	"lb/server"
 )
 
 // LoadBalancer represents your load balancer
@@ -105,4 +108,30 @@ func (lb *LoadBalancer) RemoveBackend(rawURL string) {
 			return
 		}
 	}
+}
+
+func (lb *LoadBalancer) EnableBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for _, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			if backend.IsAlive() {
+				return fmt.Errorf("backend %s is already enabled", rawURL)
+			}
+
+			backend.SetAlive(true)
+
+			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
+			if err != nil {
+				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
+			}
+			go server.StartServer(portNum)
+			fmt.Printf("Enabled backend: %s\n", rawURL)
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("backend %s not found", rawURL)
 }
