@@ -29,8 +29,13 @@ func (lb *LoadBalancer) GetNextBackend() *Backend {
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     backend := lb.GetNextBackend()
     if backend == nil {
-        http.Error(w, "Service not available", http.StatusServiceUnavailable)
-        return
+		if backend == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			jsonResp := `{"error": "Service unavailable", "message": "No healthy backend servers are available."}`
+			_, _ = w.Write([]byte(jsonResp))
+			return
+		}
     }
     fmt.Printf("Forwarding request to: %s\n", backend.URL)
     backend.ReverseProxy.ServeHTTP(w, r)
@@ -45,7 +50,9 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 			for _, backend := range lb.Backends {
 				resp, err := http.Get(backend.URL.String())
 				if err != nil || resp.StatusCode >= 400 {
-					fmt.Printf("Server %s is down\n", backend.URL.String())
+					if backend.IsAlive() {
+						fmt.Printf("Server %s was up but now is down\n", backend.URL.String())
+					}
 					backend.SetAlive(false)
 				} else {
 					if !backend.IsAlive() {
