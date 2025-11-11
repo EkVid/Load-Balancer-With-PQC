@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"time"
+
 	"lb/models"
+	"lb/utils"
 )
 
 func main() {
@@ -35,6 +37,8 @@ func main() {
 
 	// Start health check
 	lb.StartHealthCheck(5 * time.Second)
+
+	utils.StartAdminServer(lb)
 
 	fmt.Println("Load Balancer started on :8080")
 	if err := http.ListenAndServe(":8080", lb); err != nil {
