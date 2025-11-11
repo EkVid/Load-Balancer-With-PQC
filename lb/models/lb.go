@@ -135,3 +135,30 @@ func (lb *LoadBalancer) EnableBackend(rawURL string) error {
 
 	return fmt.Errorf("backend %s not found", rawURL)
 }
+
+
+func (lb *LoadBalancer) DisableBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for _, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			if !backend.IsAlive() {
+				return fmt.Errorf("backend %s is already disabled", rawURL)
+			}
+
+			backend.SetAlive(false)
+
+			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
+			if err != nil {
+				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
+			}
+			go server.StopServer(portNum)
+			fmt.Printf("Disabled backend: %s\n", rawURL)
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("backend %s not found", rawURL)
+}
