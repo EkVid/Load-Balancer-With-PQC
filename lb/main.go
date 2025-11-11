@@ -13,7 +13,7 @@ import (
 
 func main() {
 	// Start backend servers first
-	start := false
+	start := true
 	if start {
 		numServers := 5
 		startingPort := 8081
