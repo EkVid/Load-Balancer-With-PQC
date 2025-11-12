@@ -13,9 +13,11 @@ type Backend struct {
 	Alive        bool
 	mu           sync.RWMutex 
 	ReverseProxy *httputil.ReverseProxy
-	weight 		 int
+	Weight 		 int
 	currentLoad  int64
 	avgRespTime  atomic.Int64
+	MaxLoad      int64
+	CurrentLoad  int64
 }
 
 // creates and initializes a new Backend Server
@@ -29,7 +31,9 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 		URL:          parsedURL,
 		Alive:        true,
 		ReverseProxy: httputil.NewSingleHostReverseProxy(parsedURL),
-		weight:       1,    
+		Weight:       1,    
+		MaxLoad:      5, 
+		CurrentLoad:  0,
 	}, nil
 }
 
@@ -42,19 +46,16 @@ func (lb *LoadBalancer) GetNextBackend() *Backend {
 	bestScore := float64(-1 << 62)
 
 	for _, backend := range lb.Backends {
-		if !backend.IsAlive() {
+		if !backend.IsAlive() || atomic.LoadInt64(&backend.CurrentLoad) >= backend.MaxLoad {
 			continue
 		}
 
-		// Convert response time to float64
 		respTime := float64(backend.avgRespTime.Load())
 		if respTime == 0 {
-			respTime = 1 // avoid division by zero
+			respTime = 1 // avoid div by zero
 		}
 
-		// Score = weight / response time - currentLoad penalty
-		score := float64(backend.weight)/respTime - float64(backend.currentLoad)
-
+		score := float64(backend.Weight)/respTime - float64(backend.CurrentLoad)
 		if score > bestScore {
 			bestScore = score
 			best = backend
@@ -63,7 +64,6 @@ func (lb *LoadBalancer) GetNextBackend() *Backend {
 
 	return best
 }
-
 
 // SetAlive safely updates the Alive status of a backend
 func (b *Backend) SetAlive(alive bool) {

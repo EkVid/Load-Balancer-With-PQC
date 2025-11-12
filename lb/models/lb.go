@@ -17,34 +17,54 @@ type LoadBalancer struct {
 	Backends []*Backend 
 	Counter  uint64    
 	mu sync.RWMutex
+	MaxConcurrent int64
+	ActiveRequests int64
+	RateLimiter *RateLimiter
 }
 
-// http.Handler
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    backend := lb.GetNextBackend()
-
-	if backend == nil {
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		jsonResp := `{"error": "Service unavailable", "message": "No healthy backend servers are available."}`
-		_, _ = w.Write([]byte(jsonResp))
+	// Global congestion control: rate limiting
+	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Rate limit exceeded"}`))
 		return
-    }
-	atomic.AddInt64(&backend.currentLoad, 1)
+	}
+
+	// Global congestion control: max concurrent
+	if lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"Server overloaded"}`))
+		return
+	}
+
+	atomic.AddInt64(&lb.ActiveRequests, 1)
+	defer atomic.AddInt64(&lb.ActiveRequests, -1)
+
+	// Select backend (per-backend congestion aware)
+	backend := lb.GetNextBackend()
+	if backend == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"No healthy backend available"}`))
+		return
+	}
+
+	// Increment backend load
+	atomic.AddInt64(&backend.CurrentLoad, 1)
+	defer atomic.AddInt64(&backend.CurrentLoad, -1)
+
 	start := time.Now()
+	fmt.Printf("Forwarding request to: %s\n", backend.URL)
 
-    fmt.Printf("Forwarding request to: %s\n", backend.URL)
-	
-    backend.ReverseProxy.ServeHTTP(w, r)
+	backend.ReverseProxy.ServeHTTP(w, r)
 
+	// Update backend average response time
 	respTime := time.Since(start).Milliseconds()
 	old := backend.avgRespTime.Load()
 	newAvg := (old + respTime) / 2
-	backend.avgRespTime.Store(newAvg)	
+	backend.avgRespTime.Store(newAvg)
 }
 
-
+// healthcheck for backend servers
 func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 	fmt.Println("Health check started...")
 	ticker := time.NewTicker(interval)
