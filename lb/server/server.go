@@ -1,4 +1,4 @@
-// this file can run with go run server.go, which will start ${num} servers based on the numServers variable
+// this file defines the functions for the servers
 
 package server
 
