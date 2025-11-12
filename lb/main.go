@@ -12,8 +12,11 @@ import (
 )
 
 func main() {
-	lb := &models.LoadBalancer{}
-
+	lb := &models.LoadBalancer{
+		MaxConcurrent: 20,                                 // global concurrent limit
+		RateLimiter:   models.NewRateLimiter(50, time.Second), // 50 req/sec
+	}
+	
 	start := true
 	numServers := 5
 	startingPort := 8081
@@ -26,7 +29,7 @@ func main() {
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		// Create backend objects
+		// Create and populate backend objects
 		for i := 0; i < numServers; i++ {
 			port := startingPort + i
 			rawURL := fmt.Sprintf("http://localhost:%d", port)
