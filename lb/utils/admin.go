@@ -8,7 +8,7 @@ import (
 	"lb/models"
 )
 
-// StartAdminServer runs the admin API on :9090 to add/remove backends dynamically.
+// StartAdminServer runs the admin API on :9090 to modify backend servers dynamically.
 func StartAdminServer(lb *models.LoadBalancer) {
 	http.HandleFunc("/admin/add", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
