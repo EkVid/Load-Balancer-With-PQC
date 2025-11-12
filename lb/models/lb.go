@@ -22,7 +22,9 @@ type LoadBalancer struct {
 // http.Handler
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     backend := lb.GetNextBackend()
-    if backend == nil {
+
+	if backend == nil {
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		jsonResp := `{"error": "Service unavailable", "message": "No healthy backend servers are available."}`

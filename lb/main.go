@@ -2,60 +2,68 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"time"
+	"sync"
 
 	"lb/models"
-	"lb/utils"
 	"lb/server"
+	"lb/utils"
 )
 
 func main() {
-	// Start backend servers first
+	lb := &models.LoadBalancer{}
+
 	start := true
+	numServers := 5
+	startingPort := 8081
+
 	if start {
-		numServers := 5
-		startingPort := 8081
+		// Start backend servers
 		for i := 0; i < numServers; i++ {
 			port := startingPort + i
 			go server.StartServer(port)
-			time.Sleep(200 * time.Millisecond) // avoid race
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		// Create backend objects
+		for i := 0; i < numServers; i++ {
+			port := startingPort + i
+			rawURL := fmt.Sprintf("http://localhost:%d", port)
+
+			backend, err := models.CreateBackendServer(rawURL)
+			if err != nil {
+				fmt.Printf("Invalid backend URL %s: %v\n", rawURL, err)
+				continue
+			}
+			lb.Backends = append(lb.Backends, backend)
 		}
 	}
 
-	
-	// List of backend URLs
-	backendURLs := []string{
-		"http://localhost:8081",
-		"http://localhost:8082",
-		"http://localhost:8083",
-		"http://localhost:8084",
-		"http://localhost:8085",
-	}
-
-	// Create backend objects
-	var backends []*models.Backend
-	for _, rawURL := range backendURLs {
-		backend, err := models.CreateBackendServer(rawURL)
-		if err != nil {
-			log.Fatalf("Invalid backend URL %s: %v", rawURL, err)
-		}
-		backends = append(backends, backend)
-	}
-
-	// Create load balancer
-	lb := &models.LoadBalancer{
-		Backends: backends,
-	}
-
-	// Start health check
+	// Start health checks
 	lb.StartHealthCheck(5 * time.Second)
 
+	// Start admin API
 	utils.StartAdminServer(lb)
 
-	fmt.Println("Load Balancer started on :8080")
-	if err := http.ListenAndServe(":8080", lb); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Main LB HTTP server
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: lb,
 	}
+
+	fmt.Println("Load Balancer started on :8080\n")
+
+	// Handle graceful shutdown (in a goroutine so it doesn't block)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go utils.GracefulShutdown(lb, srv, &wg)
+
+	// Start listening for requests
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Printf("Server failed: %v\n", err)
+	}
+
+	wg.Wait()
+	fmt.Println("Shutdown complete. Exiting program.")
 }
