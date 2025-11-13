@@ -148,11 +148,11 @@ func (lb *LoadBalancer) CheckAndScaleUp() {
 			}
 
 			if toAdd > 0 {
-				fmt.Printf("High load detected. Scaling up by %d servers to be safe\n", toAdd)
+				fmt.Printf("Potential high load detected. Scaling up by %d servers to be safe\n", toAdd)
 				go lb.ScaleUp(toAdd)
 			}
 		} else {
-			fmt.Println("Already at max global capacity, cannot scale up further.")
+			return
 		}
 		return
 	}
@@ -218,7 +218,7 @@ func (lb *LoadBalancer) ScaleDown() {
 
 			server.StopServer(portNum)
 			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
-			fmt.Printf("Scaled down safely: stopped backend on port %d\n", portNum)
+			fmt.Printf("Scaled down: stopped backend on port %d\n", portNum)
 			break // remove one server at a time per check
 		}
 	}
@@ -242,14 +242,32 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					if backend.IsAlive() {
 						fmt.Printf("Server %s was up but now is down\n", backend.URL.String())
 					}
+					// add to failure history
+					backend.mu.Lock()
+					backend.failHistory = append(backend.failHistory, time.Now())
+					// If too many recent failures, temporarily disable
+					if backend.RecentFailureCounts(FailurePeriod*time.Minute) > MaxAllowedFailuresInPeriod {
+						backend.disableUntil = time.Now().Add(DisaledPeriodServer * time.Minute)
+						fmt.Printf("Backend %s temporarily disabled until %v\n", backend.URL.String(), backend.disableUntil)
+					}
+					backend.mu.Unlock()
+
+					
+					// increment total failure count
+					backend.failCount ++
 					backend.SetAlive(false)
 					continue
+				} else {
+					if !backend.IsAlive() {
+						fmt.Printf("Server %s is back up running\n", backend.URL.String())
+					}
+					backend.mu.Lock()
+					if time.Now().After(backend.disableUntil) {
+						backend.disableUntil = time.Time{} // zero value
+						backend.SetAlive(true)
+					}
+					backend.mu.Unlock()
 				}
-
-				if !backend.IsAlive() {
-					fmt.Printf("Server %s is back up running\n", backend.URL.String())
-				}
-				backend.SetAlive(true)
 
 				// exponential moving avg
 				alpha := 0.3

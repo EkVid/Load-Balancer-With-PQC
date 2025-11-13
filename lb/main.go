@@ -50,10 +50,10 @@ func main() {
 	}
 
 	// next available port
-	lb.NextPort = startingPort + numServers + 1
+	lb.NextPort = startingPort + numServers
 
-	// Start health checks
-	lb.StartHealthCheck(5 * time.Second)
+	// Start health checks to run every 3s
+	lb.StartHealthCheck(3 * time.Second)
 	
 	// Start auto scaler to run every 3s
 	lb.StartAutoScaler(3 * time.Second)
@@ -88,4 +88,3 @@ func main() {
 
 
 
-// TODO: need to handle the case if a server failed and maybe shut down a server which consistently failed
