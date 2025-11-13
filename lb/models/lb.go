@@ -22,6 +22,8 @@ type LoadBalancer struct {
 	ActiveRequests int64
 	RateLimiter *RateLimiter
 	NextPort int
+	lastScaleUpTime time.Time
+	ScaleCooldown time.Duration
 }
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -82,27 +84,37 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend.avgRespTime.Store(newAvg)
 }
 
-// function to decide scale up or down
-func (lb *LoadBalancer) CheckAndScale() {
-	totalLoad := int64(0)
+// function to auto scale servers before emergent scaling up
+func (lb *LoadBalancer) StartAutoScaler(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			lb.CheckAndScaleUp()
+		}
+	}()
+}
+
+
+// function to decide if we need to scale up
+func (lb *LoadBalancer) CheckAndScaleUp() {
 	lb.mu.RLock()
-	for _, backend := range lb.Backends {
-		totalLoad += atomic.LoadInt64(&backend.CurrentLoad)
-	}
+	defer lb.mu.RUnlock()
+
 	count := len(lb.Backends)
-	lb.mu.RUnlock()
 
 	if count == 0 {
 		return
 	}
 
-	// TODO: fix the logic for avg load, it's printing 0 consistently
-	avgLoad := float64(totalLoad) / float64(count)
+	// prevent scaling forever
+	if time.Since(lb.lastScaleUpTime) < lb.ScaleCooldown {
+		return
+	}
+
 	serverCapacity := int64(count) * Backend{}.getMaxLoad()
-	fmt.Printf("Avg load is: %f\n", avgLoad)
 
 	// Scaling up: high average load
-	if avgLoad > 3 {
+	if lb.ActiveRequests > 1 {
 		if serverCapacity < lb.MaxConcurrent {
 			toAdd := 3
 
@@ -113,7 +125,7 @@ func (lb *LoadBalancer) CheckAndScale() {
 			}
 
 			if toAdd > 0 {
-				fmt.Printf("High load detected (avg=%.2f). Scaling up by %d servers.\n", avgLoad, toAdd)
+				fmt.Printf("High load detected. Scaling up by %d servers to be safe\n", toAdd)
 				go lb.ScaleUp(toAdd)
 			}
 		} else {
@@ -121,9 +133,6 @@ func (lb *LoadBalancer) CheckAndScale() {
 		}
 		return
 	}
-
-	// Scaling down: low load
-	lb.ScaleDown()
 }
 
 
@@ -140,9 +149,9 @@ func (lb *LoadBalancer) ScaleUp(optionalCount ...int) {
 		// default behavior
 		maxLoad := int(Backend{}.getMaxLoad())
 		extraBackends = int(math.Ceil(float64(lb.MaxConcurrent - int64(maxLoad*len(lb.Backends))) / float64(maxLoad)))
+		fmt.Printf("Emergent scaling up: need %d extra backends\n", extraBackends)
 	}
 
-	fmt.Printf("Scaling up: need %d extra backends\n", extraBackends)
     for i := 0; i < extraBackends; i++ {
         port := lb.NextPort
         templateURL := fmt.Sprintf("http://localhost:%d", port)
@@ -231,8 +240,8 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					resp.Body.Close()
 				}
 			}
-			// periodically check and scale as well
-			lb.CheckAndScale()
+			// periodically scale down as well
+			lb.ScaleDown()
 		}
 	}()
 }
