@@ -90,5 +90,8 @@ func main() {
 	fmt.Println("Shutdown complete. Exiting program\n")
 }
 
+// TODO: add decryption logic when accepting HTTPS with PQC
 
+// TODO: refine the LB algorithm
 
+// TODO: add priority handling (handle the requests with priority first)
