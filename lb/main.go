@@ -15,11 +15,13 @@ func main() {
 	start := true
 	numServers := 2
 	startingPort := 8081
+	scaleCooldown := 10 * time.Second
 
 	lb := &models.LoadBalancer{
 		MaxConcurrent: 100,                                 // global concurrent limit 100 req (num req that can be handled concurrently)
 		RateLimiter:   models.NewRateLimiter(100, time.Second), // 100 req/sec
 		NextPort: startingPort,
+		ScaleCooldown: scaleCooldown,
 	}
 
 	if start {
@@ -49,18 +51,9 @@ func main() {
 
 	// Start health checks
 	lb.StartHealthCheck(5 * time.Second)
-
-
-    // Start automatic cleanup of temporary backends if there are any for every minute
-	// go func() {
-	// 	fmt.Println("Starting temporary backend cleanup ticker...")
-	// 	ticker := time.NewTicker(5 * time.Second)
-	// 	for range ticker.C {
-	// 		fmt.Println("Running cleanup...")
-	// 		lb.RemoveTempServers()
-	// 	}
-	// }()
 	
+	// Start auto scaler to run every 3s
+	lb.StartAutoScaler(3 * time.Second)
 
 	// Start admin API
 	utils.StartAdminServer(lb)
@@ -90,3 +83,7 @@ func main() {
 
 
 // Q: if I remove a port, should the next port take over it or its fine to not use it??
+
+// TODO: queue the extra requests instead of dropping them, and define a hard limit of how long the queue can be
+
+// TODO: need to handle the case if a server failed and maybe shut down a server which consistently failed
