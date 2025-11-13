@@ -78,3 +78,8 @@ func (b *Backend) IsAlive() bool {
 	defer b.mu.RUnlock()
 	return b.Alive
 }
+
+// return the maxLoad for each backend
+func (b Backend) getMaxLoad() int64 {
+	return 5
+}
