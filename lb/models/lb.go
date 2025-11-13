@@ -30,6 +30,8 @@ type LoadBalancer struct {
 const ReqLimitScaleUp = 1 // limit to decide if need to scale up 
 const NumSeversToAdd = 3 // how many servers to add if needed
 const MinServers = 5 // how many servers we should keep minimum
+const ClientTimeOut = 5 // how long client will wait for server to respond (sec)
+const ExpoMovingAvgCoef = 0.3 // alpha
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	task := &RequestTask{
@@ -230,7 +232,7 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		client := &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: ClientTimeOut * time.Second,
 		}
 		for range ticker.C {
 			for _, backend := range lb.Backends {
@@ -270,7 +272,7 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 				}
 
 				// exponential moving avg
-				alpha := 0.3
+				alpha := ExpoMovingAvgCoef
 				old := float64(backend.avgRespTime.Load())
 				newAvg := int64((1-alpha)*old + alpha*float64(elapsed))
 				backend.avgRespTime.Store(newAvg)

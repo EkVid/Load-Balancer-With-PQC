@@ -18,10 +18,14 @@ func main() {
 	scaleCooldown := 10 * time.Second
 	queueLength := 100
 	maxQueueingTime := 5
+	maxConcurrent := 100
+	rateLimit := 100
+	checkingPeriod := 3 * time.Second
+	serverStartingDelay := 200
 
 	lb := &models.LoadBalancer{
-		MaxConcurrent: 100,                                 // global concurrent limit 100 req (num req that can be handled concurrently)
-		RateLimiter:   models.NewRateLimiter(100, time.Second), // 100 req/sec
+		MaxConcurrent: int64(maxConcurrent),                                 // global concurrent limit 100 req (num req that can be handled concurrently)
+		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // 100 req/sec
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
 		RequestQueue: make(chan *models.RequestTask, queueLength),
@@ -32,7 +36,7 @@ func main() {
 		for i := 0; i < numServers; i++ {
 			port := startingPort + i
 			go server.StartServer(port)
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(time.Duration(serverStartingDelay) * time.Millisecond)
 		}
 
 		// Create and populate backend objects
@@ -52,11 +56,11 @@ func main() {
 	// next available port
 	lb.NextPort = startingPort + numServers
 
-	// Start health checks to run every 3s
-	lb.StartHealthCheck(3 * time.Second)
+	// Start health checks to run periodically
+	lb.StartHealthCheck(checkingPeriod)
 	
-	// Start auto scaler to run every 3s
-	lb.StartAutoScaler(3 * time.Second)
+	// Start auto scaler to run periodically
+	lb.StartAutoScaler(checkingPeriod)
 
 	// Start admin API
 	utils.StartAdminServer(lb)
@@ -83,7 +87,7 @@ func main() {
 	}
 
 	wg.Wait()
-	fmt.Println("Shutdown complete. Exiting program.")
+	fmt.Println("Shutdown complete. Exiting program\n")
 }
 
 
