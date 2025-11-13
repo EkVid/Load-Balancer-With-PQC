@@ -6,6 +6,8 @@
 
 ## auto scaling up before emergency
 
+## queuing logic if requests exceed what we can handle
+
 ## server starting
 
 ## healthcheck
