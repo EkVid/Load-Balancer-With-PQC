@@ -38,13 +38,15 @@ func GracefulShutdown (lb *models.LoadBalancer, mainSrv *http.Server, wg *sync.W
 		fmt.Println("Load Balancer has been shut down\n")
 	}
 
+	stopped := 0
 	// need to stop backend servers as well
 	for _, backend := range lb.Backends {
 		portNum, err := strconv.Atoi(backend.URL.Port())
 		if err == nil{
 			server.StopServer(portNum)
+			stopped++
 		}
 	}
 
-	fmt.Println("All backend servers stopped successfully\n")
+	fmt.Printf("A total of %d backend servers stopped successfully\n", stopped)
 }

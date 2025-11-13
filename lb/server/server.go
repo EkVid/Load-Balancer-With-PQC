@@ -9,9 +9,13 @@ import (
     "strconv"
     "time"
     "context"
+    "sync"
 )
 
-var servers = make(map[int]*http.Server)
+var (
+    servers   = make(map[int]*http.Server)
+    serversMu sync.Mutex
+)
 
 func StartServer(port int) {
 	mux := http.NewServeMux()
@@ -31,7 +35,9 @@ func StartServer(port int) {
         Handler: mux,
     }
 
+    serversMu.Lock()
     servers[port] = srv
+    serversMu.Unlock()
 
     log.Printf("Server running on :%d", port)
     if err := srv.ListenAndServe(); err != nil {
@@ -40,7 +46,9 @@ func StartServer(port int) {
 }
 
 func StopServer(port int) {
+    serversMu.Lock()
     srv, ok := servers[port]
+    serversMu.Unlock()
     if !ok {
         log.Printf("No server running on port %d", port)
         return
