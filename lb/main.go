@@ -13,7 +13,7 @@ import (
 
 func main() {
 	start := true
-	numServers := 2
+	numServers := 5
 	startingPort := 8081
 	scaleCooldown := 10 * time.Second
 
