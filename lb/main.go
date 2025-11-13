@@ -12,8 +12,8 @@ import (
 )
 
 func main() {
-	start := false
-	numServers := 5
+	start := true
+	numServers := 2
 	startingPort := 8081
 
 	lb := &models.LoadBalancer{

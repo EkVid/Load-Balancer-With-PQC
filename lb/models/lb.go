@@ -13,10 +13,9 @@ import (
 	"lb/server"
 )
 
-// LoadBalancer represents your load balancer
+// LoadBalancer struct
 type LoadBalancer struct {
 	Backends []*Backend 
-	TempBackends []*Backend
 	Counter  uint64    
 	mu sync.RWMutex
 	MaxConcurrent int64
@@ -47,7 +46,8 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Select backend (per-backend congestion aware)
 	backend := lb.GetNextBackend()
 	if backend == nil {
-		go lb.TryScaleUp()
+		// emergency scaling up
+		go lb.ScaleUp()
 
 		// wait a few seconds then retry 
 		for i := 0; i < 10; i++ {
@@ -82,15 +82,67 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend.avgRespTime.Store(newAvg)
 }
 
-// add and enable more servers to handle the traffics
-func (lb *LoadBalancer) TryScaleUp() {
+// function to decide scale up or down
+func (lb *LoadBalancer) CheckAndScale() {
+	totalLoad := int64(0)
+	lb.mu.RLock()
+	for _, backend := range lb.Backends {
+		totalLoad += atomic.LoadInt64(&backend.CurrentLoad)
+	}
+	count := len(lb.Backends)
+	lb.mu.RUnlock()
+
+	if count == 0 {
+		return
+	}
+
+	// TODO: fix the logic for avg load, it's printing 0 consistently
+	avgLoad := float64(totalLoad) / float64(count)
+	serverCapacity := int64(count) * Backend{}.getMaxLoad()
+	fmt.Printf("Avg load is: %f\n", avgLoad)
+
+	// Scaling up: high average load
+	if avgLoad > 3 {
+		if serverCapacity < lb.MaxConcurrent {
+			toAdd := 3
+
+			remainingCapacity := lb.MaxConcurrent - serverCapacity
+			maxPossibleNewServers := int(math.Ceil(float64(remainingCapacity) / float64(Backend{}.getMaxLoad())))
+			if toAdd > maxPossibleNewServers {
+				toAdd = maxPossibleNewServers
+			}
+
+			if toAdd > 0 {
+				fmt.Printf("High load detected (avg=%.2f). Scaling up by %d servers.\n", avgLoad, toAdd)
+				go lb.ScaleUp(toAdd)
+			}
+		} else {
+			fmt.Println("Already at max global capacity, cannot scale up further.")
+		}
+		return
+	}
+
+	// Scaling down: low load
+	lb.ScaleDown()
+}
+
+
+// add and enable more servers to handle the traffics (takes optional input to decide how many servers to scale up)
+func (lb *LoadBalancer) ScaleUp(optionalCount ...int) {
     lb.mu.Lock()
     defer lb.mu.Unlock()
 
-    maxLoad := int(Backend{}.getMaxLoad())
-    extraBackends := int(math.Ceil(float64(lb.MaxConcurrent - int64(maxLoad*len(lb.Backends))) / float64(maxLoad)))
-    fmt.Printf("Scaling up: need %d extra backends\n", extraBackends)
+	var extraBackends int
+	// if arg passed in
+	if len(optionalCount) > 0 {
+		extraBackends = optionalCount[0]
+	} else {
+		// default behavior
+		maxLoad := int(Backend{}.getMaxLoad())
+		extraBackends = int(math.Ceil(float64(lb.MaxConcurrent - int64(maxLoad*len(lb.Backends))) / float64(maxLoad)))
+	}
 
+	fmt.Printf("Scaling up: need %d extra backends\n", extraBackends)
     for i := 0; i < extraBackends; i++ {
         port := lb.NextPort
         templateURL := fmt.Sprintf("http://localhost:%d", port)
@@ -101,11 +153,8 @@ func (lb *LoadBalancer) TryScaleUp() {
 			fmt.Printf("Error creating server\n")
 		}
 
-        // Add to main and temp backends list
+        // Add to main backend list
         lb.Backends = append(lb.Backends, backend)
-        lb.TempBackends = append(lb.TempBackends, backend)
-        // fmt.Printf("Registered temp backend: %s\n", templateURL)
-
         // Start server asynchronously
         go func(p int) {
             server.StartServer(p)
@@ -115,28 +164,34 @@ func (lb *LoadBalancer) TryScaleUp() {
     }
 }
 
-// function to clean up the temporarily spinned up servers 
-// TODO: fix it
-func (lb *LoadBalancer) RemoveTempServers() {
-    lb.mu.Lock()
-    defer lb.mu.Unlock()
+// remove and disable some servers 
+func (lb *LoadBalancer) ScaleDown() {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
 
-    if len(lb.TempBackends) == 0 {
-        fmt.Println("No temp backends to remove")
-        return
-    }
+	if len(lb.Backends) <= 5 {
+		// Keep at least 5 servers alive
+		return
+	}
 
-    for _, b := range lb.TempBackends {
-        url := b.URL.String()
-        fmt.Printf("Removing temp backend: %s\n", url)
-        if err := lb.DisableBackend(url); err != nil {
-            fmt.Printf("Error disabling backend %s: %v\n", url, err)
-        }
-        lb.RemoveBackend(url)
-        fmt.Printf("Backend %s removed\n", url)
-    }
-    lb.TempBackends = []*Backend{}
+	// Only consider servers with no active load
+	for i := len(lb.Backends) - 1; i >= 0; i-- {
+		backend := lb.Backends[i]
+		if atomic.LoadInt64(&backend.CurrentLoad) == 0 {
+			portNum, err := strconv.Atoi(backend.URL.Port())
+			if err != nil {
+				fmt.Printf("Invalid port for backend %s, skipping\n", backend.URL.String())
+				continue
+			}
+
+			server.StopServer(portNum)
+			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
+			fmt.Printf("Scaled down safely: stopped backend on port %d\n", portNum)
+			break // remove one server at a time per check
+		}
+	}
 }
+
 
 
 // healthcheck for backend servers
@@ -165,12 +220,19 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					fmt.Printf("Server %s is back up running\n", backend.URL.String())
 				}
 				backend.SetAlive(true)
-				backend.avgRespTime.Store((backend.avgRespTime.Load() + elapsed) / 2)
+
+				// exponential moving avg
+				alpha := 0.3
+				old := float64(backend.avgRespTime.Load())
+				newAvg := int64((1-alpha)*old + alpha*float64(elapsed))
+				backend.avgRespTime.Store(newAvg)
 
 				if resp != nil {
 					resp.Body.Close()
 				}
 			}
+			// periodically check and scale as well
+			lb.CheckAndScale()
 		}
 	}()
 }
