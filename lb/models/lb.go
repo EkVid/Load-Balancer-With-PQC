@@ -245,6 +245,7 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					// add to failure history
 					backend.mu.Lock()
 					backend.failHistory = append(backend.failHistory, time.Now())
+					
 					// If too many recent failures, temporarily disable
 					if backend.RecentFailureCounts(FailurePeriod*time.Minute) > MaxAllowedFailuresInPeriod {
 						backend.disableUntil = time.Now().Add(DisaledPeriodServer * time.Minute)
@@ -252,7 +253,6 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					}
 					backend.mu.Unlock()
 
-					
 					// increment total failure count
 					backend.failCount ++
 					backend.SetAlive(false)
@@ -283,94 +283,4 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 			lb.ScaleDown()
 		}
 	}()
-}
-
-func (lb *LoadBalancer) AddBackend(rawURL string) error {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	backend, err := CreateBackendServer(rawURL)
-	if err != nil {
-		return err
-	}
-
-    // Check if backend is alive before adding
-    resp, err := http.Get(backend.URL.String())
-    if err != nil || resp.StatusCode >= 400 {
-        backend.SetAlive(false)
-        fmt.Printf("Added backend %s (currently DOWN)\n", rawURL)
-    } else {
-        backend.SetAlive(true)
-        fmt.Printf("Added backend %s (UP)\n", rawURL)
-        resp.Body.Close()
-    }
-
-	lb.Backends = append(lb.Backends, backend)
-	return nil
-}
-
-func (lb *LoadBalancer) RemoveBackend(rawURL string) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	for i, backend := range lb.Backends {
-		if backend.URL.String() == rawURL {
-			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
-			fmt.Printf("Removed backend: %s\n", rawURL)
-			return
-		}
-	}
-}
-
-func (lb *LoadBalancer) EnableBackend(rawURL string) error {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	for _, backend := range lb.Backends {
-		if backend.URL.String() == rawURL {
-			if backend.IsAlive() {
-				return fmt.Errorf("backend %s is already enabled", rawURL)
-			}
-
-			backend.SetAlive(true)
-
-			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
-			if err != nil {
-				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
-			}
-			go server.StartServer(portNum)
-			fmt.Printf("Enabled backend: %s\n", rawURL)
-
-			return nil
-		}
-	}
-
-	return fmt.Errorf("backend %s not found", rawURL)
-}
-
-
-func (lb *LoadBalancer) DisableBackend(rawURL string) error {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-
-	for _, backend := range lb.Backends {
-		if backend.URL.String() == rawURL {
-			if !backend.IsAlive() {
-				return fmt.Errorf("backend %s is already disabled", rawURL)
-			}
-
-			backend.SetAlive(false)
-
-			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
-			if err != nil {
-				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
-			}
-			go server.StopServer(portNum)
-			fmt.Printf("Disabled backend: %s\n", rawURL)
-
-			return nil
-		}
-	}
-
-	return fmt.Errorf("backend %s not found", rawURL)
 }
