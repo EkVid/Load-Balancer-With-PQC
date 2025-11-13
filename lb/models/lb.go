@@ -48,9 +48,22 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := lb.GetNextBackend()
 	if backend == nil {
 		go lb.TryScaleUp()
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"No healthy backend available, scaling up..."}`))
-		return
+
+		// wait a few seconds then retry 
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			backend = lb.GetNextBackend()
+			if backend != nil {
+				fmt.Println("Backend became available, proceeding...")
+				break
+			}
+		}
+
+		if backend == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Scaling up, please retry later"}`))
+			return
+		}
 	}
 
 	// Increment backend load
@@ -102,7 +115,8 @@ func (lb *LoadBalancer) TryScaleUp() {
     }
 }
 
-// function to clean up the temporarily spinned up servers
+// function to clean up the temporarily spinned up servers 
+// TODO: fix it
 func (lb *LoadBalancer) RemoveTempServers() {
     lb.mu.Lock()
     defer lb.mu.Unlock()

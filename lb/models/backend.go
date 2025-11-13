@@ -20,6 +20,8 @@ type Backend struct {
 	CurrentLoad  int64
 }
 
+const ServerMaxLoad = 5 // req to handle simutaneously
+
 // creates and initializes a new Backend Server
 func CreateBackendServer(rawURL string) (*Backend, error) {
 	parsedURL, err := url.Parse(rawURL)
@@ -32,7 +34,7 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 		Alive:        true,
 		ReverseProxy: httputil.NewSingleHostReverseProxy(parsedURL),
 		Weight:       1,    
-		MaxLoad:      5, 
+		MaxLoad:      ServerMaxLoad, 
 		CurrentLoad:  0,
 	}, nil
 }
@@ -81,5 +83,5 @@ func (b *Backend) IsAlive() bool {
 
 // return the maxLoad for each backend
 func (b Backend) getMaxLoad() int64 {
-	return 5
+	return ServerMaxLoad
 }

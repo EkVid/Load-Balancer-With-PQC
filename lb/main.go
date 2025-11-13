@@ -12,12 +12,12 @@ import (
 )
 
 func main() {
-	start := true
+	start := false
 	numServers := 5
 	startingPort := 8081
 
 	lb := &models.LoadBalancer{
-		MaxConcurrent: 100,                                 // global concurrent limit 100 req
+		MaxConcurrent: 100,                                 // global concurrent limit 100 req (num req that can be handled concurrently)
 		RateLimiter:   models.NewRateLimiter(100, time.Second), // 100 req/sec
 		NextPort: startingPort,
 	}
@@ -52,14 +52,14 @@ func main() {
 
 
     // Start automatic cleanup of temporary backends if there are any for every minute
-	go func() {
-		fmt.Println("Starting temporary backend cleanup ticker...")
-		ticker := time.NewTicker(5 * time.Second)
-		for range ticker.C {
-			fmt.Println("Running cleanup...")
-			lb.RemoveTempServers()
-		}
-	}()
+	// go func() {
+	// 	fmt.Println("Starting temporary backend cleanup ticker...")
+	// 	ticker := time.NewTicker(5 * time.Second)
+	// 	for range ticker.C {
+	// 		fmt.Println("Running cleanup...")
+	// 		lb.RemoveTempServers()
+	// 	}
+	// }()
 	
 
 	// Start admin API
@@ -86,3 +86,7 @@ func main() {
 	wg.Wait()
 	fmt.Println("Shutdown complete. Exiting program.")
 }
+
+
+
+// Q: if I remove a port, should the next port take over it or its fine to not use it??
