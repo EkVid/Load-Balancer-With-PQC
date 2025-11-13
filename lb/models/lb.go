@@ -3,6 +3,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 	"sync/atomic"
@@ -15,25 +16,28 @@ import (
 // LoadBalancer represents your load balancer
 type LoadBalancer struct {
 	Backends []*Backend 
+	TempBackends []*Backend
 	Counter  uint64    
 	mu sync.RWMutex
 	MaxConcurrent int64
 	ActiveRequests int64
 	RateLimiter *RateLimiter
+	NextPort int
 }
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Global congestion control: rate limiting
 	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
+		fmt.Printf("Number of requests exceeding the total rate\n")
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"Rate limit exceeded"}`))
+		w.Write([]byte(`{"error":" Global Rate limit exceeded"}`))
 		return
 	}
 
 	// Global congestion control: max concurrent
 	if lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"Server overloaded"}`))
+		w.Write([]byte(`{"error":" Server overloaded"}`))
 		return
 	}
 
@@ -43,8 +47,9 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Select backend (per-backend congestion aware)
 	backend := lb.GetNextBackend()
 	if backend == nil {
+		go lb.TryScaleUp()
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"No healthy backend available"}`))
+		w.Write([]byte(`{"error":"No healthy backend available, scaling up..."}`))
 		return
 	}
 
@@ -63,6 +68,62 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	newAvg := (old + respTime) / 2
 	backend.avgRespTime.Store(newAvg)
 }
+
+// add and enable more servers to handle the traffics
+func (lb *LoadBalancer) TryScaleUp() {
+    lb.mu.Lock()
+    defer lb.mu.Unlock()
+
+    maxLoad := int(Backend{}.getMaxLoad())
+    extraBackends := int(math.Ceil(float64(lb.MaxConcurrent - int64(maxLoad*len(lb.Backends))) / float64(maxLoad)))
+    fmt.Printf("Scaling up: need %d extra backends\n", extraBackends)
+
+    for i := 0; i < extraBackends; i++ {
+        port := lb.NextPort
+        templateURL := fmt.Sprintf("http://localhost:%d", port)
+
+        // Create backend struct
+		backend, err := CreateBackendServer(templateURL)
+		if err != nil {
+			fmt.Printf("Error creating server\n")
+		}
+
+        // Add to main and temp backends list
+        lb.Backends = append(lb.Backends, backend)
+        lb.TempBackends = append(lb.TempBackends, backend)
+        // fmt.Printf("Registered temp backend: %s\n", templateURL)
+
+        // Start server asynchronously
+        go func(p int) {
+            server.StartServer(p)
+        }(port)
+
+        lb.NextPort++
+    }
+}
+
+// function to clean up the temporarily spinned up servers
+func (lb *LoadBalancer) RemoveTempServers() {
+    lb.mu.Lock()
+    defer lb.mu.Unlock()
+
+    if len(lb.TempBackends) == 0 {
+        fmt.Println("No temp backends to remove")
+        return
+    }
+
+    for _, b := range lb.TempBackends {
+        url := b.URL.String()
+        fmt.Printf("Removing temp backend: %s\n", url)
+        if err := lb.DisableBackend(url); err != nil {
+            fmt.Printf("Error disabling backend %s: %v\n", url, err)
+        }
+        lb.RemoveBackend(url)
+        fmt.Printf("Backend %s removed\n", url)
+    }
+    lb.TempBackends = []*Backend{}
+}
+
 
 // healthcheck for backend servers
 func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {

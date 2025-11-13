@@ -12,14 +12,15 @@ import (
 )
 
 func main() {
-	lb := &models.LoadBalancer{
-		MaxConcurrent: 20,                                 // global concurrent limit
-		RateLimiter:   models.NewRateLimiter(50, time.Second), // 50 req/sec
-	}
-	
 	start := true
 	numServers := 5
 	startingPort := 8081
+
+	lb := &models.LoadBalancer{
+		MaxConcurrent: 100,                                 // global concurrent limit 100 req
+		RateLimiter:   models.NewRateLimiter(100, time.Second), // 100 req/sec
+		NextPort: startingPort,
+	}
 
 	if start {
 		// Start backend servers
@@ -43,8 +44,23 @@ func main() {
 		}
 	}
 
+	// next available port
+	lb.NextPort = startingPort + numServers + 1
+
 	// Start health checks
 	lb.StartHealthCheck(5 * time.Second)
+
+
+    // Start automatic cleanup of temporary backends if there are any for every minute
+	go func() {
+		fmt.Println("Starting temporary backend cleanup ticker...")
+		ticker := time.NewTicker(5 * time.Second)
+		for range ticker.C {
+			fmt.Println("Running cleanup...")
+			lb.RemoveTempServers()
+		}
+	}()
+	
 
 	// Start admin API
 	utils.StartAdminServer(lb)
