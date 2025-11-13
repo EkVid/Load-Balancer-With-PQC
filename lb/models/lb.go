@@ -26,6 +26,9 @@ type LoadBalancer struct {
 	ScaleCooldown time.Duration
 }
 
+const ReqLimitScaleUp = 1 // limit to decide if need to scale up 
+const NumSeversToAdd = 3 // how many servers to add if needed
+
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Global congestion control: rate limiting
 	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
@@ -37,6 +40,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Global congestion control: max concurrent
 	if lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
+		fmt.Printf("Number of requests exceeding the total reqs that can be handled concurrently\n")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":" Server overloaded"}`))
 		return
@@ -53,7 +57,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// wait a few seconds then retry 
 		for i := 0; i < 10; i++ {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 			backend = lb.GetNextBackend()
 			if backend != nil {
 				fmt.Println("Backend became available, proceeding...")
@@ -114,9 +118,9 @@ func (lb *LoadBalancer) CheckAndScaleUp() {
 	serverCapacity := int64(count) * Backend{}.getMaxLoad()
 
 	// Scaling up: high average load
-	if lb.ActiveRequests > 1 {
+	if lb.ActiveRequests > ReqLimitScaleUp {
 		if serverCapacity < lb.MaxConcurrent {
-			toAdd := 3
+			toAdd := NumSeversToAdd
 
 			remainingCapacity := lb.MaxConcurrent - serverCapacity
 			maxPossibleNewServers := int(math.Ceil(float64(remainingCapacity) / float64(Backend{}.getMaxLoad())))
@@ -200,8 +204,6 @@ func (lb *LoadBalancer) ScaleDown() {
 		}
 	}
 }
-
-
 
 // healthcheck for backend servers
 func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {

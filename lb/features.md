@@ -1,8 +1,10 @@
-## Graceful Shutdown
+## Graceful Shutdown - only finishing the ones in process, drop all other in flight requests
 
 ## Load balacing algorithm basic one
 
 ## dynamic scaling up & down
+
+## auto scaling up before emergency
 
 ## server starting
 
