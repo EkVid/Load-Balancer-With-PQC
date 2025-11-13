@@ -7,6 +7,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"lb/server"
 )
 
 type Backend struct {
@@ -20,14 +25,14 @@ type Backend struct {
 	CurrentLoad  int64
 	failCount    int32 // total failure count
 	failHistory  []time.Time // timestamps of all failures
-	disableUntil time.Time 
+	disableUntil time.Time // disabling period
 }
 
 const ServerMaxLoad = 5 // req to handle simutaneously
 const FailurePeriod = 1 // how long (min) for fail history to disable the server
-const MaxAllowedTotalFailures = 5
-const MaxAllowedFailuresInPeriod = 3
-const DisaledPeriodServer = 1
+const MaxAllowedTotalFailures = 5 // maximum allowed total failures
+const MaxAllowedFailuresInPeriod = 3 // maximum allwowed failures in a certain period
+const DisaledPeriodServer = 1 // how long to disable the backend (min)
 
 // creates and initializes a new Backend Server
 func CreateBackendServer(rawURL string) (*Backend, error) {
@@ -108,4 +113,95 @@ func (b *Backend) IsAlive() bool {
 // return the maxLoad for each backend
 func (b Backend) getMaxLoad() int64 {
 	return ServerMaxLoad
+}
+
+// Add a backend to a LoadBalancer
+func (lb *LoadBalancer) AddBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	backend, err := CreateBackendServer(rawURL)
+	if err != nil {
+		return err
+	}
+
+	// Check if backend is alive before adding
+	resp, err := http.Get(backend.URL.String())
+	if err != nil || resp.StatusCode >= 400 {
+		backend.SetAlive(false)
+		fmt.Printf("Added backend %s (currently DOWN)\n", rawURL)
+	} else {
+		backend.SetAlive(true)
+		fmt.Printf("Added backend %s (UP)\n", rawURL)
+		resp.Body.Close()
+	}
+
+	lb.Backends = append(lb.Backends, backend)
+	return nil
+}
+
+// Remove a backend from a LoadBalancer
+func (lb *LoadBalancer) RemoveBackend(rawURL string) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for i, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
+			fmt.Printf("Removed backend: %s\n", rawURL)
+			return
+		}
+	}
+}
+
+// Enable a backend
+func (lb *LoadBalancer) EnableBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for _, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			if backend.IsAlive() {
+				return fmt.Errorf("backend %s is already enabled", rawURL)
+			}
+
+			backend.SetAlive(true)
+
+			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
+			if err != nil {
+				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
+			}
+			go server.StartServer(portNum)
+			fmt.Printf("Enabled backend: %s\n", rawURL)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("backend %s not found", rawURL)
+}
+
+// Disable a backend
+func (lb *LoadBalancer) DisableBackend(rawURL string) error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for _, backend := range lb.Backends {
+		if backend.URL.String() == rawURL {
+			if !backend.IsAlive() {
+				return fmt.Errorf("backend %s is already disabled", rawURL)
+			}
+
+			backend.SetAlive(false)
+
+			portNum, err := strconv.Atoi(rawURL[len(rawURL)-4:])
+			if err != nil {
+				return fmt.Errorf("Invalid port in URL: %s\n", rawURL)
+			}
+			go server.StopServer(portNum)
+			fmt.Printf("Disabled backend: %s\n", rawURL)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("backend %s not found", rawURL)
 }
