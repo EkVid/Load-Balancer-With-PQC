@@ -16,12 +16,15 @@ func main() {
 	numServers := 5
 	startingPort := 8081
 	scaleCooldown := 10 * time.Second
+	queueLength := 100
+	maxQueueingTime := 5
 
 	lb := &models.LoadBalancer{
 		MaxConcurrent: 100,                                 // global concurrent limit 100 req (num req that can be handled concurrently)
 		RateLimiter:   models.NewRateLimiter(100, time.Second), // 100 req/sec
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
+		RequestQueue: make(chan *models.RequestTask, queueLength),
 	}
 
 	if start {
@@ -71,6 +74,9 @@ func main() {
 	wg.Add(1)
 	go utils.GracefulShutdown(lb, srv, &wg)
 
+	// Start a background worker that pulls from the queue
+	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second)
+
 	// Start listening for requests
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Printf("Server failed: %v\n", err)
@@ -81,9 +87,5 @@ func main() {
 }
 
 
-
-// Q: if I remove a port, should the next port take over it or its fine to not use it??
-
-// TODO: queue the extra requests instead of dropping them, and define a hard limit of how long the queue can be
 
 // TODO: need to handle the case if a server failed and maybe shut down a server which consistently failed
