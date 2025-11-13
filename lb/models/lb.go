@@ -24,50 +24,69 @@ type LoadBalancer struct {
 	NextPort int
 	lastScaleUpTime time.Time
 	ScaleCooldown time.Duration
+	RequestQueue chan *RequestTask
 }
 
 const ReqLimitScaleUp = 1 // limit to decide if need to scale up 
 const NumSeversToAdd = 3 // how many servers to add if needed
+const MinServers = 5 // how many servers we should keep minimum
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Global congestion control: rate limiting
+	task := &RequestTask{
+		W:           w,
+		R:           r,
+		EnqueueTime: time.Now(),
+		Done:        make(chan struct{}),
+	}
+
+	// Rate limiting
 	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
-		fmt.Printf("Number of requests exceeding the total rate\n")
-		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":" Global Rate limit exceeded"}`))
-		return
+		select {
+		case lb.RequestQueue <- task:
+			fmt.Println("Request queued due to rate limit")
+			<-task.Done // block until processed
+			return
+		default:
+			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
-	// Global congestion control: max concurrent
+	// Max concurrency
 	if lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
-		fmt.Printf("Number of requests exceeding the total reqs that can be handled concurrently\n")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":" Server overloaded"}`))
-		return
+		select {
+		case lb.RequestQueue <- task:
+			fmt.Println("Request queued due to max concurrency")
+			<-task.Done // block until processed
+			return
+		default:
+			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
+	// Process request
 	atomic.AddInt64(&lb.ActiveRequests, 1)
 	defer atomic.AddInt64(&lb.ActiveRequests, -1)
 
+	lb.handleRequest(w, r)
+}
+
+
+func (lb *LoadBalancer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Select backend (per-backend congestion aware)
 	backend := lb.GetNextBackend()
 	if backend == nil {
-		// emergency scaling up
 		go lb.ScaleUp()
-
-		// wait a few seconds then retry 
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
 			backend = lb.GetNextBackend()
 			if backend != nil {
-				fmt.Println("Backend became available, proceeding...")
 				break
 			}
 		}
-
 		if backend == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte(`{"error":"Scaling up, please retry later"}`))
+			fmt.Printf("No backend available...\n")
 			return
 		}
 	}
@@ -182,8 +201,8 @@ func (lb *LoadBalancer) ScaleDown() {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
-	if len(lb.Backends) <= 5 {
-		// Keep at least 5 servers alive
+	// Keep at least some servers alive
+	if len(lb.Backends) <= MinServers {
 		return
 	}
 
