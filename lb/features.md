@@ -12,6 +12,8 @@
 
 ## healthcheck
 
+## admin endpoint to let user to add, remove, enable, or disable a server
+
 ## Notes:
 
 We don't keep dormant servers, we instead remove them directly since they are easy to spin up in local environment.
