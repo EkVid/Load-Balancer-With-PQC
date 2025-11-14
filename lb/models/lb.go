@@ -71,12 +71,14 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&lb.ActiveRequests, 1)
 	defer atomic.AddInt64(&lb.ActiveRequests, -1)
 
+
 	lb.handleRequest(w, r)
 }
 
 
 func (lb *LoadBalancer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Select backend (per-backend congestion aware)
+
 	backend := lb.GetNextBackend()
 	if backend == nil {
 		go lb.ScaleUp()
@@ -244,31 +246,12 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					if backend.IsAlive() {
 						fmt.Printf("Server %s was up but now is down\n", backend.URL.String())
 					}
-					// add to failure history
-					backend.mu.Lock()
-					backend.failHistory = append(backend.failHistory, time.Now())
-					
-					// If too many recent failures, temporarily disable
-					if backend.RecentFailureCounts(FailurePeriod*time.Minute) > MaxAllowedFailuresInPeriod {
-						backend.disableUntil = time.Now().Add(DisaledPeriodServer * time.Minute)
-						fmt.Printf("Backend %s temporarily disabled until %v\n", backend.URL.String(), backend.disableUntil)
-					}
-					backend.mu.Unlock()
-
-					// increment total failure count
-					backend.failCount ++
 					backend.SetAlive(false)
 					continue
 				} else {
 					if !backend.IsAlive() {
 						fmt.Printf("Server %s is back up running\n", backend.URL.String())
 					}
-					backend.mu.Lock()
-					if time.Now().After(backend.disableUntil) {
-						backend.disableUntil = time.Time{} // zero value
-						backend.SetAlive(true)
-					}
-					backend.mu.Unlock()
 				}
 
 				// exponential moving avg
