@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
-	"time"
+	// "time"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -23,16 +23,9 @@ type Backend struct {
 	avgRespTime  atomic.Int64
 	MaxLoad      int64
 	CurrentLoad  int64
-	failCount    int32 // total failure count
-	failHistory  []time.Time // timestamps of all failures
-	disableUntil time.Time // disabling period
 }
 
 const ServerMaxLoad = 5 // req to handle simutaneously
-const FailurePeriod = 1 // how long (min) for fail history to disable the server
-const MaxAllowedTotalFailures = 5 // maximum allowed total failures
-const MaxAllowedFailuresInPeriod = 3 // maximum allwowed failures in a certain period
-const DisaledPeriodServer = 1 // how long to disable the backend (min)
 
 // creates and initializes a new Backend Server
 func CreateBackendServer(rawURL string) (*Backend, error) {
@@ -48,7 +41,7 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 		Weight:       1,    
 		MaxLoad:      ServerMaxLoad, 
 		CurrentLoad:  0,
-		failCount:    0,
+		// failCount:    0,
 	}, nil
 }
 
@@ -61,11 +54,9 @@ func (lb *LoadBalancer) GetNextBackend() *Backend {
 	bestScore := float64(-1 << 62)
 
 	for _, backend := range lb.Backends {
-		if !backend.IsAlive() || atomic.LoadInt64(&backend.CurrentLoad) >= backend.MaxLoad || 
-		backend.failCount >= MaxAllowedTotalFailures || 
-		backend.disableUntil.After(time.Now()) {
-		   continue
-		}
+		if !backend.IsAlive() || atomic.LoadInt64(&backend.CurrentLoad) >= backend.MaxLoad {
+			continue
+		 }
 
 		respTime := float64(backend.avgRespTime.Load())
 		if respTime == 0 {
@@ -80,20 +71,6 @@ func (lb *LoadBalancer) GetNextBackend() *Backend {
 	}
 
 	return best
-}
-
-func (b *Backend) RecentFailureCounts(duration time.Duration) int {
-	b.mu.Lock()
-    defer b.mu.Unlock()
-
-    cutoff := time.Now().Add(-duration)
-    count := 0
-    for _, t := range b.failHistory {
-        if t.After(cutoff) {
-            count++
-        }
-    }
-    return count
 }
 
 // SetAlive safely updates the Alive status of a backend
