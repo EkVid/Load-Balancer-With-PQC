@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	// change here for how many req to send and how many to send concurrently
 	totalRequests  = 300
 	maxConcurrency = 100
 	url            = "http://localhost:8080"
