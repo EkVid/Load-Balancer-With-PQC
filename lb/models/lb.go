@@ -26,7 +26,6 @@ type LoadBalancer struct {
 	ScaleCooldown time.Duration
 	LowPriorityRequestQueue chan *RequestTask
 	HighPriorityWaitingQueue chan *RequestTask
-	rrIndex int // for round robin
 }
 
 const (
