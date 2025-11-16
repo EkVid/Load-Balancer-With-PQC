@@ -24,16 +24,20 @@ type LoadBalancer struct {
 	NextPort int
 	lastScaleUpTime time.Time
 	ScaleCooldown time.Duration
-	RequestQueue chan *RequestTask
+	LowPriorityRequestQueue chan *RequestTask
+	HighPriorityWaitingQueue chan *RequestTask
 }
 
-const ReqLimitScaleUp = 1 // limit to decide if need to scale up 
-const NumSeversToAdd = 3 // how many servers to add if needed
-const MinServers = 5 // how many servers we should keep minimum
-const ClientTimeOut = 5 // how long client will wait for server to respond (sec)
-const ExpoMovingAvgCoef = 0.3 // alpha
+const (
+	ReqLimitScaleUp = 1 // limit to decide if need to scale up 
+	NumSeversToAdd = 3 // how many servers to add if needed
+	MinServers = 5 // how many servers we should keep minimum
+	ClientTimeOut = 5 // how long client will wait for server to respond (sec)
+	ExpoMovingAvgCoef = 0.3 // alpha
+)
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
 	task := &RequestTask{
 		W:           w,
 		R:           r,
@@ -41,12 +45,29 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Done:        make(chan struct{}),
 	}
 
+	// check priority
+    priority := r.Header.Get("Priority")
+
+	if priority != "High" {
+		select {
+		case lb.LowPriorityRequestQueue <-task:
+			// <-task.Done
+			return
+		default: 
+		    fmt.Printf("Server busy, 503 returned\n")
+			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
+			return
+		}
+	}
+
+	fmt.Printf("High priority request, process first...\n")
+
 	// Rate limiting
 	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
 		select {
-		case lb.RequestQueue <- task:
-			fmt.Println("Request queued due to rate limit")
-			<-task.Done // block until processed
+		case lb.HighPriorityWaitingQueue <- task:
+			fmt.Println("High Priority Request queued due to rate limit\n")
+			// <-task.Done // block until processed
 			return
 		default:
 			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
@@ -57,9 +78,9 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Max concurrency
 	if lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
 		select {
-		case lb.RequestQueue <- task:
-			fmt.Println("Request queued due to max concurrency")
-			<-task.Done // block until processed
+		case lb.HighPriorityWaitingQueue <- task:
+			fmt.Println("High Priority Request queued due to max concurrency\n")
+			// <-task.Done // block until processed
 			return
 		default:
 			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
@@ -71,14 +92,12 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&lb.ActiveRequests, 1)
 	defer atomic.AddInt64(&lb.ActiveRequests, -1)
 
-
 	lb.handleRequest(w, r)
 }
 
 
 func (lb *LoadBalancer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Select backend (per-backend congestion aware)
-
 	backend := lb.GetNextBackend()
 	if backend == nil {
 		go lb.ScaleUp()
@@ -228,6 +247,15 @@ func (lb *LoadBalancer) ScaleDown() {
 	}
 }
 
+func (lb *LoadBalancer) StartPeriodicScaleDown(interval time.Duration) {
+	ticker := time.NewTicker(interval) 
+	go func() {
+		for range ticker.C {
+			lb.ScaleDown()
+		}
+	}()
+}
+
 // healthcheck for backend servers
 func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 	fmt.Println("Health check started...")
@@ -264,8 +292,6 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 					resp.Body.Close()
 				}
 			}
-			// periodically scale down as well
-			lb.ScaleDown()
 		}
 	}()
 }
