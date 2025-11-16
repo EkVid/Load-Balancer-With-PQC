@@ -16,11 +16,13 @@ func main() {
 	numServers := 5
 	startingPort := 8081
 	scaleCooldown := 10 * time.Second
-	queueLength := 100
-	maxQueueingTime := 5
-	maxConcurrent := 100
+	lowqueueLength := 200
+	highqueueLength := 100
+	maxQueueingTime := 60
+	maxConcurrent := 200
 	rateLimit := 100
 	checkingPeriod := 3 * time.Second
+	scaleDownPeriod := 60 * time.Second
 	serverStartingDelay := 200
 
 	lb := &models.LoadBalancer{
@@ -28,7 +30,8 @@ func main() {
 		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // 100 req/sec
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
-		RequestQueue: make(chan *models.RequestTask, queueLength),
+		LowPriorityRequestQueue: make(chan *models.RequestTask, lowqueueLength),
+		HighPriorityWaitingQueue: make(chan *models.RequestTask, highqueueLength),
 	}
 
 	if start {
@@ -61,6 +64,9 @@ func main() {
 	
 	// Start auto scaler to run periodically
 	lb.StartAutoScaler(checkingPeriod)
+
+	// start scale down
+	lb.StartPeriodicScaleDown(scaleDownPeriod)
 
 	// Start admin API
 	utils.StartAdminServer(lb)

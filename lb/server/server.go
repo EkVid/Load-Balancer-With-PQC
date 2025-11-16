@@ -26,8 +26,12 @@ func StartServer(port int) {
 		// } else {
 		// 	time.Sleep(500 * time.Millisecond)
 		// }
+        priority := r.Header.Get("Priority")
+        if priority != "High" {
+            priority = "Low"
+        }
         time.Sleep(500 * time.Millisecond)
-        fmt.Fprintf(w, "Hello from Server %d\n", port)
+        fmt.Fprintf(w, "Hello from Server %d, serving req with priority: %s\n", port, priority)
     })
 
     srv := &http.Server{

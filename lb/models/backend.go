@@ -46,32 +46,58 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 }
 
 // load balancing algorithm - weighted + response time + least-loaded 
+// func (lb *LoadBalancer) GetNextBackend() *Backend {
+// 	lb.mu.RLock()
+// 	defer lb.mu.RUnlock()
+
+// 	var best *Backend
+// 	bestScore := float64(-1 << 62)
+
+// 	for _, backend := range lb.Backends {
+// 		if !backend.IsAlive() || atomic.LoadInt64(&backend.CurrentLoad) >= backend.MaxLoad {
+// 			continue
+// 		 }
+
+// 		respTime := float64(backend.avgRespTime.Load())
+// 		if respTime == 0 {
+// 			respTime = 1 // avoid div by zero
+// 		}
+
+// 		score := float64(backend.Weight)/respTime - float64(backend.CurrentLoad)
+// 		if score > bestScore {
+// 			bestScore = score
+// 			best = backend
+// 		}
+// 	}
+
+// 	return best
+// }
+
+// round robin
 func (lb *LoadBalancer) GetNextBackend() *Backend {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
+    lb.mu.Lock()
+    defer lb.mu.Unlock()
 
-	var best *Backend
-	bestScore := float64(-1 << 62)
+    n := len(lb.Backends)
+    if n == 0 {
+        return nil
+    }
 
-	for _, backend := range lb.Backends {
-		if !backend.IsAlive() || atomic.LoadInt64(&backend.CurrentLoad) >= backend.MaxLoad {
-			continue
-		 }
+    for i := 0; i < n; i++ {
+        // move to next index
+        lb.rrIndex = (lb.rrIndex + 1) % n
+        backend := lb.Backends[lb.rrIndex]
 
-		respTime := float64(backend.avgRespTime.Load())
-		if respTime == 0 {
-			respTime = 1 // avoid div by zero
-		}
+        // skip dead or overloaded backends
+        if backend.IsAlive() && atomic.LoadInt64(&backend.CurrentLoad) < backend.MaxLoad {
+            return backend
+        }
+    }
 
-		score := float64(backend.Weight)/respTime - float64(backend.CurrentLoad)
-		if score > bestScore {
-			bestScore = score
-			best = backend
-		}
-	}
-
-	return best
+    // all backends are dead or full
+    return nil
 }
+
 
 // SetAlive safely updates the Alive status of a backend
 func (b *Backend) SetAlive(alive bool) {
