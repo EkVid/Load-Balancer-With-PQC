@@ -51,7 +51,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if priority != "High" {
 		select {
 		case lb.LowPriorityRequestQueue <-task:
-			// <-task.Done
 			return
 		default: 
 		    fmt.Printf("Server busy, 503 returned\n")
@@ -67,7 +66,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case lb.HighPriorityWaitingQueue <- task:
 			fmt.Println("High Priority Request queued due to rate limit\n")
-			// <-task.Done // block until processed
 			return
 		default:
 			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
@@ -80,7 +78,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case lb.HighPriorityWaitingQueue <- task:
 			fmt.Println("High Priority Request queued due to max concurrency\n")
-			// <-task.Done // block until processed
 			return
 		default:
 			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
