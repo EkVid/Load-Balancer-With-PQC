@@ -6,28 +6,40 @@ import (
 	"time"
 	"sync"
 
+	"log"
+	"strconv"
+
+	"lb/config"
 	"lb/models"
 	"lb/server"
 	"lb/utils"
 )
 
 func main() {
-	start := true
-	numServers := 5
-	startingPort := 8081
-	scaleCooldown := 10 * time.Second
-	lowqueueLength := 200
-	highqueueLength := 100
-	maxQueueingTime := 60
-	maxConcurrent := 200
-	rateLimit := 100
-	checkingPeriod := 3 * time.Second
-	scaleDownPeriod := 60 * time.Second
-	serverStartingDelay := 200
+	// Load configuration
+	cfg, err := config.LoadConfig("config/config.json")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// setting params
+	start := cfg.StartServers
+	numServers := cfg.NumServers
+	startingPort := cfg.StartingPort
+	scaleCooldown := time.Duration(cfg.ScaleCooldownSeconds) * time.Second
+	lowqueueLength := cfg.LowPriorityQueueLength
+	highqueueLength := cfg.HighPriorityQueueLength
+	maxQueueingTime := cfg.MaxQueueingTimeSeconds
+	maxConcurrent := cfg.MaxConcurrentRequests
+	rateLimit := cfg.RateLimitPerSecond
+	checkingPeriod := time.Duration(cfg.HealthCheckPeriodSeconds) * time.Second
+	scaleDownPeriod := time.Duration(cfg.ScaleDownPeriodSeconds) * time.Second
+	serverStartingDelay := cfg.ServerStartingDelayMs
 
 	lb := &models.LoadBalancer{
-		MaxConcurrent: int64(maxConcurrent),                                 // global concurrent limit 100 req (num req that can be handled concurrently)
-		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // 100 req/sec
+		// global concurrent limit (How many active requests can the server handle concurrently before rejecting or queueing)
+		MaxConcurrent: int64(maxConcurrent),                          
+		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // total number of requests allowed per second
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
 		LowPriorityRequestQueue: make(chan *models.RequestTask, lowqueueLength),
@@ -73,11 +85,11 @@ func main() {
 
 	// Main LB HTTP server
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + strconv.Itoa(cfg.LBPort),
 		Handler: lb,
 	}
 
-	fmt.Println("Load Balancer started on :8080\n")
+	fmt.Printf("Load Balancer started on :%d\n", cfg.LBPort)
 
 	// Handle graceful shutdown (in a goroutine so it doesn't block)
 	var wg sync.WaitGroup
@@ -97,5 +109,3 @@ func main() {
 }
 
 // TODO: add decryption logic when accepting HTTPS with PQC
-
-// TODO: refine the LB algorithm
