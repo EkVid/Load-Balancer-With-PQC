@@ -1,0 +1,15 @@
+{
+  "start_servers": true,
+  "num_servers": 5,
+  "starting_port": 8081,
+  "lb_port": 8080,
+  "scale_cooldown_seconds": 10,
+  "low_priority_queue_length": 200,
+  "high_priority_queue_length": 100,
+  "max_queueing_time_seconds": 60,
+  "max_concurrent_requests": 300,
+  "rate_limit_per_second": 100,
+  "health_check_period_seconds": 3,
+  "scale_down_period_seconds": 60,
+  "server_starting_delay_ms": 200
+}
