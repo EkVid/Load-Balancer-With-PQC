@@ -38,6 +38,14 @@ const (
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
+	// check if IP is blocked
+	clientIP := GetClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	if IsIPBlocked(clientIP) {
+		fmt.Printf("Blocked IP: %s\n", clientIP)
+        http.Error(w, "403 Forbidden - IP Blocked", http.StatusForbidden)
+        return	
+	}
+
 	task := &RequestTask{
 		W:           w,
 		R:           r,
