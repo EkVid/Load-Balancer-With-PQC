@@ -16,7 +16,11 @@
 
 ## requests with priority handling
 
+## firewall system to block a list of IPs
+
 ## Notes:
+
+To test firewall system, do curl -H "X-Forwarded-For: 10.20.30.40" http://localhost:8080
 
 We don't keep dormant servers, we instead remove them directly since they are easy to spin up in local environment.
 
