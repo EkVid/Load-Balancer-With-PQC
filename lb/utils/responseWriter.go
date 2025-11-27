@@ -1,3 +1,7 @@
+package utils
+
+import "net/http"
+
 type safeResponseWriter struct {
     http.ResponseWriter
     wroteHeader bool
