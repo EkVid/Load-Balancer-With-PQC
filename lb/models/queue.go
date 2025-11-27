@@ -9,7 +9,7 @@ import (
 )
 // RequestTask holds the queued HTTP request
 type RequestTask struct {
-    W:      http.ResponseWriter
+	W       http.ResponseWriter
 	R       *http.Request
 	EnqueueTime time.Time
 	Done    chan struct{} // when a request is done
