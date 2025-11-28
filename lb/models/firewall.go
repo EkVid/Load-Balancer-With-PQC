@@ -5,10 +5,6 @@ import (
     "strings"
 )
 
-var blockedIPs = map[string]bool{
-	"10.20.30.40": true,
-    "123.45.67.89": true,
-}
 
 var blockedNets []*net.IPNet
 
@@ -17,8 +13,8 @@ var blockedNets []*net.IPNet
 func GetClientIP(remoteAddr string, forwardedFor string) string {
 	if forwardedFor != "" {
 		parts := strings.Split(forwardedFor, ",")
-		// actual first client IP
-        return strings.TrimSpace(parts[0])
+		clientIP := strings.TrimSpace(parts[0])
+		return clientIP
 	}
 
 	ip, _, err := net.SplitHostPort(remoteAddr)
@@ -29,7 +25,65 @@ func GetClientIP(remoteAddr string, forwardedFor string) string {
 	return ip
 }
 
-// Returns true if the IP is exactly in BlockedIPs
-func IsIPBlocked(ip string) bool {
-    return blockedIPs[ip]
+
+// IsBlocked checks if an IP matches either a plain IP or a CIDR
+func IsBlocked(ip string, blockedIPs []string, blockedCIDRs []string) bool {
+	ip = strings.TrimSpace(ip)
+
+	// Check exact IP matches first
+	for _, b := range blockedIPs {
+		if ip == strings.TrimSpace(b) {
+			return true
+		}
+	}
+
+	// Parse the client IP
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+
+	// Check CIDR ranges
+	for _, cidr := range blockedCIDRs {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsedIP) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsPriority works similarly for priority IPs
+func IsPriority(ip string, priorityIPs []string, priorityCIDRs []string) bool {
+	ip = strings.TrimSpace(ip)
+
+	// Check exact IPs
+	for _, p := range priorityIPs {
+		if ip == strings.TrimSpace(p) {
+			return true
+		}
+	}
+
+	// Parse the client IP
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+
+	// Check CIDR ranges
+	for _, cidr := range priorityCIDRs {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsedIP) {
+			return true
+		}
+	}
+
+	return false
 }
