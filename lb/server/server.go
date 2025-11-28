@@ -20,17 +20,11 @@ var (
 func StartServer(port int) {
 	mux := http.NewServeMux()
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        // simulate busy server for testing
-		// if port == 8083 {
-		// 	time.Sleep(10 * time.Second)
-		// } else {
-		// 	time.Sleep(500 * time.Millisecond)
-		// }
         priority := r.Header.Get("Priority")
         if priority != "High" {
             priority = "Low"
         }
-        time.Sleep(500 * time.Millisecond)
+        time.Sleep(100 * time.Millisecond)
         fmt.Fprintf(w, "Hello from Server %d, serving req with priority: %s\n", port, priority)
     })
 

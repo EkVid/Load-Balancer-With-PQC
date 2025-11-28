@@ -47,7 +47,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task := &RequestTask{
-		W:           w,
+        W:  		 &safeResponseWriter{ResponseWriter: w},
 		R:           r,
 		EnqueueTime: time.Now(),
 		Done:        make(chan struct{}),

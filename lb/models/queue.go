@@ -16,28 +16,32 @@ type RequestTask struct {
 }
 
 // StartQueueProcessor starts a background worker that processes queued requests
-func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration) {
-	go func() {
-		// weights: 70% high, 30% low
-		highWeight := 7
-		lowWeight := 3
+func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration, workerCount int) {
+	for i := 0; i < workerCount; i++ {
+		go func(id int) {
+			// weights: 70% high, 30% low
+			highWeight := 7
+			lowWeight := 3
 
-		for {
-			total := highWeight + lowWeight
-			choice := rand.Intn(total) // 0..total-1
-
-			if choice < highWeight && len(lb.HighPriorityWaitingQueue) > 0 {
-				// process one high-priority task
-				lb.ProcessQueue(lb.HighPriorityWaitingQueue, timeout, 1)
-			} else if len(lb.LowPriorityRequestQueue) > 0 {
-				// process one low-priority task
-				lb.ProcessQueue(lb.LowPriorityRequestQueue, timeout, 1)
+			fmt.Printf("Queue worker %d started\n", id)
+	
+			for {
+				total := highWeight + lowWeight
+				choice := rand.Intn(total) // 0..total-1
+	
+				if choice < highWeight && len(lb.HighPriorityWaitingQueue) > 0 {
+					// process one high-priority task
+					lb.ProcessQueue(lb.HighPriorityWaitingQueue, timeout, 1)
+				} else if len(lb.LowPriorityRequestQueue) > 0 {
+					// process one low-priority task
+					lb.ProcessQueue(lb.LowPriorityRequestQueue, timeout, 1)
+				}
+	
+				// small sleep to avoid busy loop
+				time.Sleep(5 * time.Millisecond)
 			}
-
-			// small sleep to avoid busy loop
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
+		}(i)
+	}
 }
 
 
