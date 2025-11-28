@@ -22,6 +22,24 @@ var lowCount int64
 var highSuccess int64
 var lowSuccess int64
 
+var ipList = []string{
+	"203.0.113.42",
+	"123.45.67.89",
+	"10.20.30.40",
+	"203.0.113.99",
+}
+
+func randomIP() string {
+	return ipList[rand.Intn(len(ipList))]
+}
+
+func maybeAddForwardedFor(req *http.Request) {
+	if rand.Intn(2) == 1 { // 50% chance
+		req.Header.Set("X-Forwarded-For", randomIP())
+	}
+}
+
+
 func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem chan struct{}) {
 	defer wg.Done()
 
@@ -43,6 +61,8 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 	}
 
 	req.Header.Set("Priority", priority)
+
+	maybeAddForwardedFor(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
