@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"sync"
 	"strconv"
+	"log"
 
 	"lb/server"
 	"lb/config"
@@ -28,14 +29,6 @@ type LoadBalancer struct {
 	LowPriorityRequestQueue chan *RequestTask
 	HighPriorityWaitingQueue chan *RequestTask
 }
-
-const (
-	ReqLimitScaleUp = 1 // limit to decide if need to scale up 
-	NumSeversToAdd = 3 // how many servers to add if needed
-	MinServers = 5 // how many servers we should keep minimum
-	ClientTimeOut = 5 // how long client will wait for server to respond (sec)
-	ExpoMovingAvgCoef = 0.3 // alpha
-)
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
@@ -111,15 +104,15 @@ func (lb *LoadBalancer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	backend := lb.GetNextBackend()
 	if backend == nil {
 		go lb.ScaleUp()
-		for i := 0; i < 10; i++ {
-			time.Sleep(1 * time.Second)
+		for i := 0; i < config.MaxRetry; i++ {
+			time.Sleep(config.WaitTime * time.Second)
 			backend = lb.GetNextBackend()
 			if backend != nil {
 				break
 			}
 		}
 		if backend == nil {
-			fmt.Printf("No backend available...\n")
+			log.Printf("No backend available...\n")
 			return
 		}
 	}
@@ -129,7 +122,7 @@ func (lb *LoadBalancer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	defer atomic.AddInt64(&backend.CurrentLoad, -1)
 
 	start := time.Now()
-	fmt.Printf("Forwarding request to: %s\n", backend.URL)
+	log.Printf("Forwarding request to: %s", backend.URL)
 
 	backend.ReverseProxy.ServeHTTP(w, r)
 
@@ -170,9 +163,9 @@ func (lb *LoadBalancer) CheckAndScaleUp() {
 	serverCapacity := int64(count) * Backend{}.getMaxLoad()
 
 	// Scaling up: high average load
-	if lb.ActiveRequests > ReqLimitScaleUp {
+	if lb.ActiveRequests > config.ReqLimitScaleUp {
 		if serverCapacity < lb.MaxConcurrent {
-			toAdd := NumSeversToAdd
+			toAdd := config.NumSeversToAdd
 
 			remainingCapacity := lb.MaxConcurrent - serverCapacity
 			maxPossibleNewServers := int(math.Ceil(float64(remainingCapacity) / float64(Backend{}.getMaxLoad())))
@@ -181,7 +174,7 @@ func (lb *LoadBalancer) CheckAndScaleUp() {
 			}
 
 			if toAdd > 0 {
-				fmt.Printf("Potential high load detected. Scaling up by %d servers to be safe\n", toAdd)
+				log.Printf("Potential high load detected. Scaling up by %d servers to be safe\n", toAdd)
 				go lb.ScaleUp(toAdd)
 			}
 		} else {
@@ -205,7 +198,7 @@ func (lb *LoadBalancer) ScaleUp(optionalCount ...int) {
 		// default behavior
 		maxLoad := int(Backend{}.getMaxLoad())
 		extraBackends = int(math.Ceil(float64(lb.MaxConcurrent - int64(maxLoad*len(lb.Backends))) / float64(maxLoad)))
-		fmt.Printf("Emergent scaling up: need %d extra backends\n", extraBackends)
+		log.Printf("Emergent scaling up: need %d extra backends\n", extraBackends)
 	}
 
     for i := 0; i < extraBackends; i++ {
@@ -235,7 +228,7 @@ func (lb *LoadBalancer) ScaleDown() {
 	defer lb.mu.Unlock()
 
 	// Keep at least some servers alive
-	if len(lb.Backends) <= MinServers {
+	if len(lb.Backends) <= config.MinServers {
 		return
 	}
 
@@ -245,13 +238,13 @@ func (lb *LoadBalancer) ScaleDown() {
 		if atomic.LoadInt64(&backend.CurrentLoad) == 0 {
 			portNum, err := strconv.Atoi(backend.URL.Port())
 			if err != nil {
-				fmt.Printf("Invalid port for backend %s, skipping\n", backend.URL.String())
+				log.Printf("Invalid port for backend %s, skipping\n", backend.URL.String())
 				continue
 			}
 
 			server.StopServer(portNum)
 			lb.Backends = append(lb.Backends[:i], lb.Backends[i+1:]...)
-			fmt.Printf("Scaled down: stopped backend on port %d\n", portNum)
+			log.Printf("Scaled down: stopped backend on port %d\n", portNum)
 			break // remove one server at a time per check
 		}
 	}
@@ -272,7 +265,7 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		client := &http.Client{
-			Timeout: ClientTimeOut * time.Second,
+			Timeout: config.ClientTimeOut * time.Second,
 		}
 		for range ticker.C {
 			for _, backend := range lb.Backends {
@@ -282,18 +275,18 @@ func (lb *LoadBalancer) StartHealthCheck(interval time.Duration) {
 
 				if err != nil || resp.StatusCode >= 400 {
 					if backend.IsAlive() {
-						fmt.Printf("Server %s was up but now is down\n", backend.URL.String())
+						log.Printf("Server %s was up but now is down\n", backend.URL.String())
 					}
 					backend.SetAlive(false)
 					continue
 				} else {
 					if !backend.IsAlive() {
-						fmt.Printf("Server %s is back up running\n", backend.URL.String())
+						log.Printf("Server %s is back up running\n", backend.URL.String())
 					}
 				}
 
 				// exponential moving avg
-				alpha := ExpoMovingAvgCoef
+				alpha := config.ExpoMovingAvgCoef
 				old := float64(backend.avgRespTime.Load())
 				newAvg := int64((1-alpha)*old + alpha*float64(elapsed))
 				backend.avgRespTime.Store(newAvg)

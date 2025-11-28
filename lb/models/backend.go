@@ -13,6 +13,7 @@ import (
 	"errors"
 
 	"lb/server"
+	"lb/config"
 )
 
 type Backend struct {
@@ -25,8 +26,6 @@ type Backend struct {
 	MaxLoad      int64
 	CurrentLoad  int64
 }
-
-const ServerMaxLoad = 5 // req to handle simutaneously
 
 // creates and initializes a new Backend Server
 func CreateBackendServer(rawURL string) (*Backend, error) {
@@ -44,12 +43,11 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 
 	return &Backend{
 		URL:          parsedURL,
-		Alive:        true,
+		Alive:        config.Alive,
 		ReverseProxy: proxy,
-		Weight:       1,    
-		MaxLoad:      ServerMaxLoad, 
-		CurrentLoad:  0,
-		// failCount:    0,
+		Weight:       config.Weight,    
+		MaxLoad:      config.ServerMaxLoad, 
+		CurrentLoad:  config.CurrentLoad,
 	}, nil
 }
 
@@ -97,7 +95,7 @@ func (b *Backend) IsAlive() bool {
 
 // return the maxLoad for each backend
 func (b Backend) getMaxLoad() int64 {
-	return ServerMaxLoad
+	return config.ServerMaxLoad
 }
 
 // Add a backend to a LoadBalancer

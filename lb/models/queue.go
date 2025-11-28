@@ -1,11 +1,13 @@
 package models
 
 import (
-	"fmt"
 	"net/http"
+	"log"
 	"sync/atomic"
 	"time"
 	"math/rand"
+
+	"lb/config"
 )
 // RequestTask holds the queued HTTP request
 type RequestTask struct {
@@ -19,9 +21,8 @@ type RequestTask struct {
 func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration, workerCount int) {
 	for i := 0; i < workerCount; i++ {
 		go func(id int) {
-			// weights: 70% high, 30% low
-			highWeight := 7
-			lowWeight := 3	
+			highWeight := config.HighWeight
+			lowWeight := config.LowWeight
 			for {
 				total := highWeight + lowWeight
 				choice := rand.Intn(total) // 0..total-1
@@ -35,7 +36,7 @@ func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration, workerCount i
 				}
 	
 				// small sleep to avoid busy loop
-				time.Sleep(5 * time.Millisecond)
+				time.Sleep(config.SleepTime * time.Millisecond)
 			}
 		}(i)
 	}
@@ -52,13 +53,13 @@ func (lb *LoadBalancer) ProcessQueue(q chan *RequestTask, timeout time.Duration,
 
 		// Wait if still at max concurrency
 		for lb.MaxConcurrent > 0 && atomic.LoadInt64(&lb.ActiveRequests) >= lb.MaxConcurrent {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(config.SleepTimeMaxConcurrency * time.Millisecond)
 		}
 
 		// Drop if request exceeded queue timeout
 		if time.Since(task.EnqueueTime) > timeout {
 			if task.W != nil {
-				fmt.Println("Dropping queued request due to timeout")
+				log.Println("Dropping queued request due to timeout")
 				http.Error(task.W, "Request timed out in queue", http.StatusServiceUnavailable)
 			}
 			if task.Done != nil {
@@ -69,12 +70,12 @@ func (lb *LoadBalancer) ProcessQueue(q chan *RequestTask, timeout time.Duration,
 
 		backend := lb.GetNextBackend()
 		if backend == nil {
-			fmt.Println("No backend available for queued request, requeueing")
+			log.Println("No backend available for queued request, requeueing")
 			select {
 			case q <- task:
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(config.SleepTimeQueue * time.Millisecond)
 			default:
-				fmt.Println("Queue full, dropping queued request")
+				log.Println("Queue full, dropping queued request")
 				if task.Done != nil {
 					close(task.Done)
 				}
