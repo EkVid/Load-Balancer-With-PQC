@@ -6,10 +6,11 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
-	// "time"
 	"fmt"
 	"net/http"
 	"strconv"
+	"context"
+	"errors"
 
 	"lb/server"
 )
@@ -34,10 +35,17 @@ func CreateBackendServer(rawURL string) (*Backend, error) {
 		return nil, err
 	}
 
+	proxy := httputil.NewSingleHostReverseProxy(parsedURL)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+	}
+
 	return &Backend{
 		URL:          parsedURL,
 		Alive:        true,
-		ReverseProxy: httputil.NewSingleHostReverseProxy(parsedURL),
+		ReverseProxy: proxy,
 		Weight:       1,    
 		MaxLoad:      ServerMaxLoad, 
 		CurrentLoad:  0,
