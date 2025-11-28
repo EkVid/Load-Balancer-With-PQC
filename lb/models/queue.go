@@ -21,10 +21,7 @@ func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration, workerCount i
 		go func(id int) {
 			// weights: 70% high, 30% low
 			highWeight := 7
-			lowWeight := 3
-
-			fmt.Printf("Queue worker %d started\n", id)
-	
+			lowWeight := 3	
 			for {
 				total := highWeight + lowWeight
 				choice := rand.Intn(total) // 0..total-1

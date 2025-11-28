@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"lb/server"
+	"lb/config"
 )
 
 // LoadBalancer struct
@@ -40,7 +41,7 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// check if IP is blocked
 	clientIP := GetClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-	if IsIPBlocked(clientIP) {
+	if IsBlocked(clientIP, config.BlockedIPs, config.BlockedCIDRs) {
 		fmt.Printf("Blocked IP: %s\n", clientIP)
         http.Error(w, "403 Forbidden - IP Blocked", http.StatusForbidden)
         return	
@@ -55,6 +56,10 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// check priority
     priority := r.Header.Get("Priority")
+	if IsPriority(clientIP, config.PriorityIPs, config.PriorityCIDRs) {
+		priority = "High"
+		fmt.Printf("IP %s detected, forcing High priority\n", clientIP)
+	}
 
 	if priority != "High" {
 		select {
