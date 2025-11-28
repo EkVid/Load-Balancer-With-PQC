@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 	"sync"
-
 	"strconv"
 
 	"lb/config"
@@ -32,8 +32,7 @@ func main() {
 	numWorkers := config.NumberOfWorkers
 
 	lb := &models.LoadBalancer{
-		// global concurrent limit (How many active requests can the server handle concurrently before rejecting or queueing)
-		MaxConcurrent: int64(maxConcurrent),                          
+		MaxConcurrent: int64(maxConcurrent), // global concurrent limit (How many active requests can the server handle concurrently before rejecting or queueing)                        
 		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // total number of requests allowed per second
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
@@ -56,7 +55,7 @@ func main() {
 
 			backend, err := models.CreateBackendServer(rawURL)
 			if err != nil {
-				fmt.Printf("Invalid backend URL %s: %v\n", rawURL, err)
+				log.Printf("Invalid backend URL %s: %v\n", rawURL, err)
 				continue
 			}
 			lb.Backends = append(lb.Backends, backend)
@@ -84,7 +83,7 @@ func main() {
 		Handler: lb,
 	}
 
-	fmt.Printf("Load Balancer started on :%d\n", lbPort)
+	log.Printf("Load Balancer started on :%d\n", lbPort)
 
 	// Handle graceful shutdown (in a goroutine so it doesn't block)
 	var wg sync.WaitGroup
@@ -96,11 +95,11 @@ func main() {
 
 	// Start listening for requests
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Printf("Server failed: %v\n", err)
+		log.Println("Server failed: %v\n", err)
 	}
 
 	wg.Wait()
-	fmt.Println("Shutdown complete. Exiting program\n")
+	log.Println("Shutdown complete. Exiting program\n")
 }
 
 // TODO: add decryption logic when accepting HTTPS with PQC
