@@ -97,7 +97,7 @@ func main() {
 	go utils.GracefulShutdown(lb, srv, &wg)
 
 	// Start a background worker that pulls from the queue
-	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second)
+	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second, 20)
 
 	// Start listening for requests
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
