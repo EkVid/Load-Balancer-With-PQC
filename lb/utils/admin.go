@@ -4,7 +4,10 @@ package utils
 import (
 	"fmt"
 	"log"
+    "strconv"
 	"net/http"
+
+	"lb/config"
 	"lb/models"
 )
 
@@ -89,7 +92,7 @@ func StartAdminServer(lb *models.LoadBalancer) {
 	})
 
 	go func() {
-		fmt.Println("Admin API started on :9090")
-		log.Fatal(http.ListenAndServe(":9090", nil))
+		log.Printf("Admin API started on port :%d\n", config.AdminAPIPort)
+		log.Fatal(http.ListenAndServe(":" + strconv.Itoa(config.AdminAPIPort), nil))
 	}()
 }

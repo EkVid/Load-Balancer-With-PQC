@@ -35,7 +35,7 @@ func StartServer(port int) {
 
     log.Printf("Server running on :%d", port)
     if err := srv.ListenAndServe(); err != nil {
-        log.Println("Server %d stopped: %v", port, err)
+        log.Printf("Server %d stopped\n", port)
     }
 }
 
@@ -44,7 +44,7 @@ func StopServer(port int) {
     srv, ok := servers[port]
     serversMu.Unlock()
     if !ok {
-        log.Println("No server running on port %d", port)
+        log.Printf("No server running on port %d", port)
         return
     }
 
@@ -53,9 +53,9 @@ func StopServer(port int) {
     defer cancel()
 
     if err := srv.Shutdown(ctx); err != nil {
-        log.Println("Server %d shutdown error: %v", port, err)
+        log.Printf("Server %d shutdown error: %v", port, err)
     } else {
-        log.Println("Server %d stopped", port)
+        log.Printf("Server %d stopped", port)
     }
 
     // Remove from map

@@ -3,7 +3,7 @@ package utils
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,28 +14,29 @@ import (
 
 	"lb/models"
 	"lb/server"
+	"lb/config"
 )
 
 
 // GracefulShutdown listens for OS signals (Ctrl+C, SIGTERM) and gracefully shuts down servers.
 func GracefulShutdown (lb *models.LoadBalancer, mainSrv *http.Server, wg *sync.WaitGroup ){
 	defer wg.Done()
-	stop := make(chan os.Signal, 1)
+	stop := make(chan os.Signal, config.BufferSize)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	// we should block until signal received
 	<-stop
-	fmt.Println("Shutting down Load Balancer...\n")
+	log.Println("Shutting down Load Balancer...\n")
 
-	// 10 seconds grace period
-	ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+	// grace period
+	ctx, cancel := context.WithTimeout(context.Background(), config.GracePeriod * time.Second)
 	defer cancel()
 
 	// stop LB gracefully
 	if err := mainSrv.Shutdown(ctx); err != nil {
-		fmt.Printf("Erorr shutting down the Load Balancer: %v\n", err)
+		log.Printf("Erorr shutting down the Load Balancer: %v\n", err)
 	} else {
-		fmt.Println("Load Balancer has been shut down\n")
+		log.Println("Load Balancer has been shut down\n")
 	}
 
 	stopped := 0
@@ -48,5 +49,5 @@ func GracefulShutdown (lb *models.LoadBalancer, mainSrv *http.Server, wg *sync.W
 		}
 	}
 
-	fmt.Printf("A total of %d backend servers stopped successfully\n", stopped)
+	log.Printf("A total of %d backend servers stopped successfully\n", stopped)
 }
