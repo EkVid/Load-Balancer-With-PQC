@@ -9,6 +9,8 @@ import (
     "time"
     "context"
     "sync"
+
+    "lb/config"
 )
 
 var (
@@ -19,7 +21,7 @@ var (
 func StartServer(port int) {
 	mux := http.NewServeMux()
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        time.Sleep(100 * time.Millisecond)
+        time.Sleep(config.SleepTimeHandling * time.Millisecond)
     })
 
     srv := &http.Server{
@@ -33,7 +35,7 @@ func StartServer(port int) {
 
     log.Printf("Server running on :%d", port)
     if err := srv.ListenAndServe(); err != nil {
-        log.Printf("Server %d stopped: %v", port, err)
+        log.Println("Server %d stopped: %v", port, err)
     }
 }
 
@@ -42,18 +44,18 @@ func StopServer(port int) {
     srv, ok := servers[port]
     serversMu.Unlock()
     if !ok {
-        log.Printf("No server running on port %d", port)
+        log.Println("No server running on port %d", port)
         return
     }
 
     // Gracefully shutdown with a timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    ctx, cancel := context.WithTimeout(context.Background(), config.SleepTimeOut * time.Second)
     defer cancel()
 
     if err := srv.Shutdown(ctx); err != nil {
-        log.Printf("Server %d shutdown error: %v", port, err)
+        log.Println("Server %d shutdown error: %v", port, err)
     } else {
-        log.Printf("Server %d stopped", port)
+        log.Println("Server %d stopped", port)
     }
 
     // Remove from map

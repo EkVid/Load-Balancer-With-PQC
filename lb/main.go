@@ -6,7 +6,6 @@ import (
 	"time"
 	"sync"
 
-	"log"
 	"strconv"
 
 	"lb/config"
@@ -16,25 +15,21 @@ import (
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.LoadConfig("config/config.json")
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
 	// setting params
-	start := cfg.StartServers
-	numServers := cfg.NumServers
-	startingPort := cfg.StartingPort
-	scaleCooldown := time.Duration(cfg.ScaleCooldownSeconds) * time.Second
-	lowqueueLength := cfg.LowPriorityQueueLength
-	highqueueLength := cfg.HighPriorityQueueLength
-	maxQueueingTime := cfg.MaxQueueingTimeSeconds
-	maxConcurrent := cfg.MaxConcurrentRequests
-	rateLimit := cfg.RateLimitPerSecond
-	checkingPeriod := time.Duration(cfg.HealthCheckPeriodSeconds) * time.Second
-	scaleDownPeriod := time.Duration(cfg.ScaleDownPeriodSeconds) * time.Second
-	serverStartingDelay := cfg.ServerStartingDelayMs
+	lbPort := config.LBPort
+	start := config.StartServers
+	numServers := config.NumServers
+	startingPort := config.StartingPort
+	scaleCooldown := time.Duration(config.ScaleCooldownSeconds) * time.Second
+	lowQueueLength := config.LowPriorityQueueLength
+	highQueueLength := config.HighPriorityQueueLength
+	maxQueueingTime := config.MaxQueueingTimeSeconds
+	maxConcurrent := config.MaxConcurrentRequests
+	rateLimit := config.RateLimitPerSecond
+	checkingPeriod := time.Duration(config.HealthCheckPeriodSeconds) * time.Second
+	scaleDownPeriod := time.Duration(config.ScaleDownPeriodSeconds) * time.Second
+	serverStartingDelay := config.ServerStartingDelayMs
+	numWorkers := config.NumberOfWorkers
 
 	lb := &models.LoadBalancer{
 		// global concurrent limit (How many active requests can the server handle concurrently before rejecting or queueing)
@@ -42,8 +37,8 @@ func main() {
 		RateLimiter:   models.NewRateLimiter(rateLimit, time.Second), // total number of requests allowed per second
 		NextPort: startingPort,
 		ScaleCooldown: scaleCooldown,
-		LowPriorityRequestQueue: make(chan *models.RequestTask, lowqueueLength),
-		HighPriorityWaitingQueue: make(chan *models.RequestTask, highqueueLength),
+		LowPriorityRequestQueue: make(chan *models.RequestTask, lowQueueLength),
+		HighPriorityWaitingQueue: make(chan *models.RequestTask, highQueueLength),
 	}
 
 	if start {
@@ -85,11 +80,11 @@ func main() {
 
 	// Main LB HTTP server
 	srv := &http.Server{
-		Addr:    ":" + strconv.Itoa(cfg.LBPort),
+		Addr:    ":" + strconv.Itoa(lbPort),
 		Handler: lb,
 	}
 
-	fmt.Printf("Load Balancer started on :%d\n", cfg.LBPort)
+	fmt.Printf("Load Balancer started on :%d\n", lbPort)
 
 	// Handle graceful shutdown (in a goroutine so it doesn't block)
 	var wg sync.WaitGroup
@@ -97,7 +92,7 @@ func main() {
 	go utils.GracefulShutdown(lb, srv, &wg)
 
 	// Start a background worker that pulls from the queue
-	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second, 20)
+	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second, numWorkers)
 
 	// Start listening for requests
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
