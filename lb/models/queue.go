@@ -29,10 +29,10 @@ func (lb *LoadBalancer) StartQueueProcessor(timeout time.Duration, workerCount i
 	
 				if choice < highWeight && len(lb.HighPriorityWaitingQueue) > 0 {
 					// process one high-priority task
-					lb.ProcessQueue(lb.HighPriorityWaitingQueue, timeout, 1)
+					lb.ProcessQueue(lb.HighPriorityWaitingQueue, timeout, config.MaxTasks)
 				} else if len(lb.LowPriorityRequestQueue) > 0 {
 					// process one low-priority task
-					lb.ProcessQueue(lb.LowPriorityRequestQueue, timeout, 1)
+					lb.ProcessQueue(lb.LowPriorityRequestQueue, timeout, config.MaxTasks)
 				}
 	
 				// small sleep to avoid busy loop
