@@ -19,8 +19,19 @@ const (
 var successCount int64
 var highCount int64
 var lowCount int64
+
 var highSuccess int64
 var lowSuccess int64
+
+var failureCount int64
+var highFailure int64
+var lowFailure int64
+
+var blockedCount int64
+var highBlocked int64
+var lowBlocked int64
+
+
 
 var ipList = []string{
 	"203.0.113.42",
@@ -39,6 +50,33 @@ func maybeAddForwardedFor(req *http.Request) {
 	}
 }
 
+func countRequests(status int, priority string) {
+	switch status {
+	case 200:
+		atomic.AddInt64(&successCount, 1)
+		if priority == "High" {
+			atomic.AddInt64(&highSuccess, 1)
+		} else {
+			atomic.AddInt64(&lowSuccess, 1)
+		}
+
+	case 403:
+		atomic.AddInt64(&blockedCount, 1)
+		if priority == "High" {
+			atomic.AddInt64(&highBlocked, 1)
+		} else {
+			atomic.AddInt64(&lowBlocked, 1)
+		}
+
+	default:
+		atomic.AddInt64(&failureCount, 1)
+		if priority == "High" {
+			atomic.AddInt64(&highFailure, 1)
+		} else {
+			atomic.AddInt64(&lowFailure, 1)
+		}
+	}
+}
 
 func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem chan struct{}) {
 	defer wg.Done()
@@ -80,15 +118,8 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 	fmt.Printf("Priority: %s, Status: %d, From: %s\n",
 		priority, resp.StatusCode, fromIP)
 	
-	// Count successful requests
-	if resp.StatusCode == 200 {
-		atomic.AddInt64(&successCount, 1)
-		if priority == "High" {
-			atomic.AddInt64(&highSuccess, 1)
-		} else {
-			atomic.AddInt64(&lowSuccess, 1)
-		}
-	}
+	// Count requests
+	countRequests(resp.StatusCode, priority)
 }
 
 func main() {
@@ -114,8 +145,20 @@ func main() {
 
 	// Wait for all requests to finish
 	wg.Wait()
-	fmt.Printf("All requests completed.\n")
-	fmt.Printf("Successful (200) requests: %d/%d\n", successCount, totalRequests)
-	fmt.Printf("High priority requests sent: %d, Successful: %d\n", highCount, highSuccess)
-	fmt.Printf("Low priority requests sent: %d, Successful: %d\n", lowCount, lowSuccess)
+	fmt.Printf("\nAll requests completed.\n")
+	fmt.Printf("Total: %d\n", totalRequests)
+	fmt.Printf("Successful (200): %d\n", successCount)
+	fmt.Printf("Blocked (403): %d\n", blockedCount)
+	fmt.Printf("Failed (others): %d\n", failureCount)
+
+	fmt.Printf("\nHigh priority requests sent: %d\n", highCount)
+	fmt.Printf("    Successful: %d\n", highSuccess)
+	fmt.Printf("    Blocked:    %d\n", highBlocked)
+	fmt.Printf("    Failed:     %d\n", highFailure)
+
+	fmt.Printf("\nLow priority requests sent: %d\n", lowCount)
+	fmt.Printf("    Successful: %d\n", lowSuccess)
+	fmt.Printf("    Blocked:    %d\n", lowBlocked)
+	fmt.Printf("    Failed:     %d\n", lowFailure)
+
 }
