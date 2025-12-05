@@ -1,8 +1,6 @@
-use std::env::{args};
-use std::io::{Read, Write, Result as ResultIO};
+use std::env::args;
+use std::io::{Read, Result as ResultIO, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::result::Result;
-use std::sync::Arc;
 use std::time::Duration;
 
 use pqcrypto::kem::mlkem512::{decapsulate, keypair, public_key_bytes};
@@ -11,7 +9,8 @@ use pqcrypto::traits::kem::{Ciphertext, PublicKey, SharedSecret};
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Error as ErrorAES, KeyInit, Nonce};
 
-use rustls::pki_types::{ServerName};
+use h2::client;
+use tokio::net::TcpStream as TokioStream;
 
 /// Returns array of bytes read from socket, which will
 /// be the full packet
@@ -48,10 +47,10 @@ fn encrypt_fn(cipher: &Aes256Gcm, plaintext: &[u8]) -> Result<Vec<u8>, ErrorAES>
     match cipher.encrypt(&nonce, plaintext) {
         Ok(mut ct) => {
             let mut full_vec = nonce.to_vec();
-            full_vec.append(&mut ct); 
+            full_vec.append(&mut ct);
             Ok(full_vec)
-        },
-        Err(e) => Err(e)
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -65,30 +64,31 @@ fn decrypt_fn(cipher: &Aes256Gcm, ciphertext: &[u8]) -> Result<Vec<u8>, ErrorAES
     cipher.decrypt(nonce, &ciphertext[12..])
 }
 
-fn do_tls(domain: String) {
-    // The next 3 lines of code were borrowed from rustls documentation under "Getting started"
-    // https://docs.rs/rustls/latest/rustls/
-    let root_store = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let client_config = rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
-    let config = Arc::new(client_config);
-
-    let name: ServerName<'_> = domain.clone().try_into().expect("Failed to convert into ServerName");
-
-    let mut client = rustls::ClientConnection::new(config, name).expect("Failed to create client connection");
-
-    let mut addrs = (domain, 443 as u16).to_socket_addrs().expect("Failed to convert domain to IP");
+/// Makes an HTTPS connection to domain
+async fn do_https(domain: String) {
+    let mut addrs = (domain, 443 as u16)
+        .to_socket_addrs()
+        .expect("Failed to convert domain to IP");
     let sock_addr = addrs.next().unwrap();
+    let mut sock = TokioStream::connect(&sock_addr).await.unwrap();
 
-    println!("{}", sock_addr.to_string());
+    // Write GET message to server
+    let (http2, conn) = client::handshake(sock).await.unwrap();
+
+    // Read response
+    let mut res  = String::new();
+
+    print!("{}", res);
 }
 
 
-fn main() -> ResultIO<()> {
+#[tokio::main]
+async fn main() -> ResultIO<()> {
     // Run with "cargo run <domain or IP+port>"
     let cli_args: Vec<String> = args().collect();
 
     if !cli_args[1].contains(":") {
-        do_tls(cli_args[1].clone());
+        do_https(cli_args[1].clone()).await;
         return Ok(());
     }
 
@@ -109,7 +109,8 @@ fn main() -> ResultIO<()> {
     let server_res = read_socket(&mut socket)?;
 
     // Get shared key
-    let server_ct = Ciphertext::from_bytes(&server_res[..public_key_bytes()]).expect("Failed to convert server ct to Ciphertext");
+    let server_ct = Ciphertext::from_bytes(&server_res[..public_key_bytes()])
+        .expect("Failed to convert server ct to Ciphertext");
     let server_hello_data = &server_res[public_key_bytes()..];
 
     let shared_key = decapsulate(&server_ct, &client_skey);
