@@ -1,4 +1,4 @@
-// this file defines the data structure and helper functions for LB
+// this file defines the data structure for the load balancer, and associated functions 
 package models
 
 import (

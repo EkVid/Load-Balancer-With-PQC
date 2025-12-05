@@ -1,3 +1,4 @@
+// this file contains functions for the firewall system
 package models
 
 import (

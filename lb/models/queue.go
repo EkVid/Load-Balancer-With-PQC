@@ -1,3 +1,4 @@
+// this file contains the structure for the Queue, and functions related to it
 package models
 
 import (
