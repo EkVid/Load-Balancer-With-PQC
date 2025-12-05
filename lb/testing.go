@@ -34,7 +34,7 @@ func randomIP() string {
 }
 
 func maybeAddForwardedFor(req *http.Request) {
-	if rand.Intn(2) == 1 { // 50% chance
+	if rand.Intn(2) == 1 { // 50% chance to set it
 		req.Header.Set("X-Forwarded-For", randomIP())
 	}
 }
@@ -62,6 +62,7 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 
 	req.Header.Set("Priority", priority)
 
+	// comment out if dont want firewall
 	maybeAddForwardedFor(req)
 
 	resp, err := client.Do(req)
@@ -71,8 +72,14 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("Priority: %s, Status: %d\n", priority, resp.StatusCode)
-
+	fromIP := req.Header.Get("X-Forwarded-For")
+	if fromIP == "" {
+		fromIP = "N/A"
+	}
+	
+	fmt.Printf("Priority: %s, Status: %d, From: %s\n",
+		priority, resp.StatusCode, fromIP)
+	
 	// Count successful requests
 	if resp.StatusCode == 200 {
 		atomic.AddInt64(&successCount, 1)
