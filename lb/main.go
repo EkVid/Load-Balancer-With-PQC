@@ -7,6 +7,7 @@ import (
 	"time"
 	"sync"
 	"strconv"
+	"strings"
 
 	"lb/config"
 	"lb/models"
@@ -77,25 +78,75 @@ func main() {
 	// Start admin API
 	utils.StartAdminServer(lb)
 
-	// Main LB HTTP server
-	srv := &http.Server{
-		Addr:    ":" + strconv.Itoa(lbPort),
-		Handler: lb,
-	}
-
-	log.Printf("Load Balancer started on :%d\n", lbPort)
-
-	// Handle graceful shutdown (in a goroutine so it doesn't block)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go utils.GracefulShutdown(lb, srv, &wg)
-
 	// Start a background worker that pulls from the queue
 	lb.StartQueueProcessor(time.Duration(maxQueueingTime) * time.Second, numWorkers)
 
-	// Start listening for requests
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Println("Server failed: %v\n", err)
+	// Handle graceful shutdown
+	var wg sync.WaitGroup
+
+	// If HTTPS is enabled
+	if config.EnableHTTPS {
+		// Main HTTPS server with secure TLS configuration
+		httpsSrv := &http.Server{
+			Addr:      ":" + strconv.Itoa(config.HTTPSPort),
+			Handler:   lb,
+			TLSConfig: utils.GetSecureTLSConfig(),
+		}
+
+		log.Printf("HTTPS Load Balancer started on :%d\n", config.HTTPSPort)
+
+		// Optional: Redirect HTTP to HTTPS
+		if config.RedirectHTTPToHTTPS {
+			httpSrv := &http.Server{
+				Addr: ":" + strconv.Itoa(config.HTTPPort),
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					host := r.Host
+					if colonPos := strings.Index(host, ":"); colonPos != -1 {
+                		host = host[:colonPos]
+					}
+
+					httpsURL := fmt.Sprintf("https://%s:%d%s", host, config.HTTPSPort, r.RequestURI)
+					http.Redirect(w, r, httpsURL, http.StatusMovedPermanently)
+				}),
+			}
+
+			log.Printf("HTTP redirect server started on :%d (redirecting to HTTPS)\n", config.HTTPPort)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					log.Printf("HTTP redirect server failed: %v\n", err)
+				}
+			}()
+
+			wg.Add(1)
+			go utils.GracefulShutdown(lb, httpSrv, &wg)
+		}
+
+		wg.Add(1)
+		go utils.GracefulShutdown(lb, httpsSrv, &wg)
+
+		// Start HTTPS listener
+		if err := httpsSrv.ListenAndServeTLS(config.CertFile, config.KeyFile); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTPS server failed: %v\n", err)
+		}
+	} else {
+		// Main HTTP server (original behavior)
+		srv := &http.Server{
+			Addr:    ":" + strconv.Itoa(lbPort),
+			Handler: lb,
+		}
+
+		log.Printf("HTTP Load Balancer started on :%d\n", lbPort)
+
+		wg.Add(1)
+		go utils.GracefulShutdown(lb, srv, &wg)
+
+		// Start listening for requests
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server failed: %v\n", err)
+		}
 	}
 
 	wg.Wait()
