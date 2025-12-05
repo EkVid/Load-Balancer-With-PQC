@@ -93,6 +93,8 @@ fn do_https(domain: String, endpoint: String) {
         &sock_addr, 
         Duration::from_secs(3))
         .expect("Failed to make socket");
+    let _ = sock.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = sock.set_write_timeout(Some(Duration::from_secs(10)));
 
     let mut stream = rustls::Stream::new(&mut conn, &mut sock);
 
