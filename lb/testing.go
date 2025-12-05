@@ -106,6 +106,13 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Request error:", err)
+		// Count as failure
+		atomic.AddInt64(&failureCount, 1)
+		if priority == "High" {
+			atomic.AddInt64(&highFailure, 1)
+		} else {
+			atomic.AddInt64(&lowFailure, 1)
+		}
 		return
 	}
 	defer resp.Body.Close()
