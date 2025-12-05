@@ -20,6 +20,8 @@
 
 ## automatic high priority handling from certain IPs
 
+## HTTPS support with TLS 1.3+
+
 ## Notes:
 
 If a user specifies the IP header as a high priority one but also added low priority header, it will still be treated as a high priority. In other words, the IP takes priority

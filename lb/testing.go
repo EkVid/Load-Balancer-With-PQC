@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 	"math/rand"
+	"lb/config"
 )
 
 const (
@@ -132,7 +134,18 @@ func sendRequest(client *http.Client, priority string, wg *sync.WaitGroup, sem c
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	client := &http.Client{}
+	var client *http.Client
+	if config.EnableHTTPS {
+		client = &http.Client{
+            Transport: &http.Transport{
+                TLSClientConfig: &tls.Config{
+                    InsecureSkipVerify: true, // Skip certificate verification for testing
+                },
+            },
+        }
+	}else {
+		client = &http.Client{}
+	}
 	wg := sync.WaitGroup{}
 
 	// Semaphore channel to limit concurrency
