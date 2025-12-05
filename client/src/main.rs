@@ -10,7 +10,8 @@ use pqcrypto::traits::kem::{Ciphertext, PublicKey, SharedSecret};
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Error as ErrorAES, KeyInit, Nonce};
 
-use rustls::pki_types::ServerName;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
 
 /// Returns array of bytes read from socket, which will
 /// be the full packet
@@ -68,10 +69,15 @@ fn decrypt_fn(cipher: &Aes256Gcm, ciphertext: &[u8]) -> Result<Vec<u8>, ErrorAES
 fn do_https(domain: String, endpoint: String) {
     // The next 3 variables were borrowed from rustls documentation under "Getting started"
     // https://docs.rs/rustls/latest/rustls/
-    let root_store =
+    let mut root_store =
         rustls::RootCertStore::from_iter(
             webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
         );
+
+    // Open self-signed cert to allow
+    let cert = CertificateDer::from_pem_file("self_cert.pem").unwrap();
+    root_store.add(cert).unwrap();
+    
     let client_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
@@ -105,6 +111,7 @@ fn do_https(domain: String, endpoint: String) {
     stream
         .write(&mut req)
         .unwrap();
+
     println!("Sent request, now waiting response...");
 
     // Read response
@@ -123,7 +130,7 @@ fn main() -> ResultIO<()> {
     }
 
     // Connect to server and set socket operation timeouts
-    let mut socket = TcpStream::connect("127.0.0.1:3000")?;
+    let mut socket = TcpStream::connect(&cli_args[1])?;
     socket.set_read_timeout(Some(Duration::from_secs(3)))?;
     socket.set_write_timeout(Some(Duration::from_secs(3)))?;
 
@@ -151,7 +158,7 @@ fn main() -> ResultIO<()> {
     let decrypt = |ciphertext: &[u8]| decrypt_fn(&cipher, ciphertext);
 
     // Decrypt the data and verify signature
-    let server_sig = decrypt(server_hello_data);
+    let server_sig = decrypt(server_hello_data).expect("Failed to decrypt hello");
 
     // println!("Hello, world!");
     Ok(())
