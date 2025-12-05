@@ -102,4 +102,3 @@ func main() {
 	log.Println("Shutdown complete. Exiting program\n")
 }
 
-// TODO: add decryption logic when accepting HTTPS with PQC
