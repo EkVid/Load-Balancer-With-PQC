@@ -1,6 +1,8 @@
-use std::io::{Read, Result as ResultIO, Write};
-use std::net::TcpStream;
+use std::env::{args};
+use std::io::{Read, Write, Result as ResultIO};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::result::Result;
+use std::sync::Arc;
 use std::time::Duration;
 
 use pqcrypto::kem::mlkem512::{decapsulate, keypair, public_key_bytes};
@@ -8,6 +10,8 @@ use pqcrypto::traits::kem::{Ciphertext, PublicKey, SharedSecret};
 
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Error as ErrorAES, KeyInit, Nonce};
+
+use rustls::pki_types::{ServerName};
 
 /// Returns array of bytes read from socket, which will
 /// be the full packet
@@ -61,7 +65,33 @@ fn decrypt_fn(cipher: &Aes256Gcm, ciphertext: &[u8]) -> Result<Vec<u8>, ErrorAES
     cipher.decrypt(nonce, &ciphertext[12..])
 }
 
+fn do_tls(domain: String) {
+    // The next 3 lines of code were borrowed from rustls documentation under "Getting started"
+    // https://docs.rs/rustls/latest/rustls/
+    let root_store = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let client_config = rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+    let config = Arc::new(client_config);
+
+    let name: ServerName<'_> = domain.clone().try_into().expect("Failed to convert into ServerName");
+
+    let mut client = rustls::ClientConnection::new(config, name).expect("Failed to create client connection");
+
+    let mut addrs = (domain, 443 as u16).to_socket_addrs().expect("Failed to convert domain to IP");
+    let sock_addr = addrs.next().unwrap();
+
+    println!("{}", sock_addr.to_string());
+}
+
+
 fn main() -> ResultIO<()> {
+    // Run with "cargo run <domain or IP+port>"
+    let cli_args: Vec<String> = args().collect();
+
+    if !cli_args[1].contains(":") {
+        do_tls(cli_args[1].clone());
+        return Ok(());
+    }
+
     // Connect to server and set socket operation timeouts
     let mut socket = TcpStream::connect("127.0.0.1:3000")?;
     socket.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -93,6 +123,6 @@ fn main() -> ResultIO<()> {
     // Decrypt the data and verify signature
     let server_sig = decrypt(server_hello_data);
 
-    println!("Hello, world!");
+    // println!("Hello, world!");
     Ok(())
 }
