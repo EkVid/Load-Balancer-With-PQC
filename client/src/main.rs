@@ -1,6 +1,7 @@
 use std::env::args;
 use std::io::{Read, Result as ResultIO, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::Duration;
 
 use pqcrypto::kem::mlkem512::{decapsulate, keypair, public_key_bytes};
@@ -9,8 +10,7 @@ use pqcrypto::traits::kem::{Ciphertext, PublicKey, SharedSecret};
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Error as ErrorAES, KeyInit, Nonce};
 
-use h2::client;
-use tokio::net::TcpStream as TokioStream;
+use rustls::pki_types::ServerName;
 
 /// Returns array of bytes read from socket, which will
 /// be the full packet
@@ -65,30 +65,58 @@ fn decrypt_fn(cipher: &Aes256Gcm, ciphertext: &[u8]) -> Result<Vec<u8>, ErrorAES
 }
 
 /// Makes an HTTPS connection to domain
-async fn do_https(domain: String) {
-    let mut addrs = (domain, 443 as u16)
+fn do_https(domain: String, endpoint: String) {
+    // The next 3 variables were borrowed from rustls documentation under "Getting started"
+    // https://docs.rs/rustls/latest/rustls/
+    let root_store =
+        rustls::RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
+        );
+    let client_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let config = Arc::new(client_config);
+
+    let name: ServerName<'_> = domain
+        .clone()
+        .try_into()
+        .expect("Failed to convert into ServerName");
+
+    let mut conn = rustls::ClientConnection::new(config, name)
+        .expect("Failed to create client connection");
+
+    let mut addrs = (domain.clone(), 443 as u16)
         .to_socket_addrs()
         .expect("Failed to convert domain to IP");
     let sock_addr = addrs.next().unwrap();
-    let mut sock = TokioStream::connect(&sock_addr).await.unwrap();
+    let mut sock = TcpStream::connect_timeout(
+        &sock_addr, 
+        Duration::from_secs(3))
+        .expect("Failed to make socket");
+
+    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
 
     // Write GET message to server
-    let (http2, conn) = client::handshake(sock).await.unwrap();
+    let req = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", endpoint, domain);
+    print!("{}", req.clone());
+    let mut req = req.as_bytes();
+    stream
+        .write(&mut req)
+        .unwrap();
+    println!("Sent request, now waiting response...");
 
     // Read response
     let mut res  = String::new();
-
+    stream.read_to_string(&mut res).unwrap();
     print!("{}", res);
 }
 
-
-#[tokio::main]
-async fn main() -> ResultIO<()> {
-    // Run with "cargo run <domain or IP+port>"
+fn main() -> ResultIO<()> {
+    // Run with "cargo run <domain or IP+port> <endpoint>"
     let cli_args: Vec<String> = args().collect();
 
     if !cli_args[1].contains(":") {
-        do_https(cli_args[1].clone()).await;
+        do_https(cli_args[1].clone(), cli_args[2].clone());
         return Ok(());
     }
 
@@ -105,7 +133,6 @@ async fn main() -> ResultIO<()> {
 
     // Wait for server to respond
     // No cert:     pk2 + E(Sig(pk1 + pk2))
-    // With cert:   pk2 + E(Sig(pk1 + pk2 + cert) + cert)
     let server_res = read_socket(&mut socket)?;
 
     // Get shared key
