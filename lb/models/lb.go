@@ -47,26 +47,6 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Done:        make(chan struct{}),
 	}
 
-	// check priority
-    priority := r.Header.Get("Priority")
-	if IsPriority(clientIP, config.PriorityIPs, config.PriorityCIDRs) {
-		priority = "High"
-		log.Printf("IP %s detected, forcing High priority\n", clientIP)
-	}
-
-	if priority != "High" {
-		select {
-		case lb.LowPriorityRequestQueue <-task:
-			return
-		default: 
-		    log.Println("Server busy, 503 returned\n")
-			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
-			return
-		}
-	}
-
-	log.Println("High priority request, process first...\n")
-
 	// Rate limiting
 	if lb.RateLimiter != nil && !lb.RateLimiter.Allow() {
 		select {
@@ -90,6 +70,26 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// check priority
+    priority := r.Header.Get("Priority")
+	if IsPriority(clientIP, config.PriorityIPs, config.PriorityCIDRs) {
+		priority = "High"
+		log.Printf("IP %s detected, forcing High priority\n", clientIP)
+	}
+
+	if priority != "High" {
+		select {
+		case lb.LowPriorityRequestQueue <-task:
+			return
+		default: 
+		    log.Println("Server busy, 503 returned\n")
+			http.Error(w, "Server busy, try again later", http.StatusServiceUnavailable)
+			return
+		}
+	}
+
+	log.Println("High priority request, process first...\n")
 
 	// Process request
 	atomic.AddInt64(&lb.ActiveRequests, 1)
