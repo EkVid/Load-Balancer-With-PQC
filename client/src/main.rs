@@ -110,7 +110,7 @@ fn do_https(domain: String, endpoint: String) {
 
     // Setup HTTP headers for GET
     let headers = [
-        ("Accept",          "*/*".to_string()),
+        ("Accept",          "text/*; application/*; multipart/*".to_string()),
         ("Accept-Encoding", "identity".to_string()),
         ("Accept-Language", "en-US".to_string()),
         ("Connection",      "close".to_string()),
