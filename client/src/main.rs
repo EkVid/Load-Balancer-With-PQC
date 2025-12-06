@@ -1,6 +1,6 @@
 use std::env::args;
 use std::fs::File;
-use std::io::{Read, Result as ResultIO, Write};
+use std::io::{Read, Result as ResultIO, Write, stdin, stdout};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
@@ -146,7 +146,7 @@ fn do_https(domain: String, endpoint: String) {
 
 }
 
-fn main() -> ResultIO<()> {
+fn main() -> Result<(), String> {
     // Run with "cargo run <domain or IP+port> <endpoint>"
     let cli_args: Vec<String> = args().collect();
 
@@ -156,19 +156,19 @@ fn main() -> ResultIO<()> {
     }
 
     // Connect to server and set socket operation timeouts
-    let mut socket = TcpStream::connect(&cli_args[1])?;
-    socket.set_read_timeout(Some(Duration::from_secs(3)))?;
-    socket.set_write_timeout(Some(Duration::from_secs(3)))?;
+    let mut socket = TcpStream::connect(&cli_args[1]).expect("Failed to open socket");
+    socket.set_read_timeout(Some(Duration::from_secs(3))).expect("Failed to set read timeout");
+    socket.set_write_timeout(Some(Duration::from_secs(3))).expect("Failed to set write timeout");
 
     // Generate client eph keys
     let (client_pkey, client_skey) = keypair();
 
     // Send client public key to server
-    write_socket(&mut socket, &client_pkey.as_bytes())?;
+    write_socket(&mut socket, &client_pkey.as_bytes()).expect("Failed to send our public key over socket");
 
     // Wait for server to respond
     // No cert:     pk2 + E(Sig(pk1 + pk2))
-    let server_res = read_socket(&mut socket)?;
+    let server_res = read_socket(&mut socket).expect("Failed to get server hello from socket");
 
     // Get shared key
     let server_pkey = &server_res[..public_key_bytes()];
@@ -193,7 +193,7 @@ fn main() -> ResultIO<()> {
     let mut server_file = File::open("TODO_server_key.idk")
         .expect("Failed to open server id public key file");
     let mut server_id_pk_bytes = Vec::new();
-    server_file.read_to_end(&mut server_id_pk_bytes)?;
+    server_file.read_to_end(&mut server_id_pk_bytes).expect("Failed to read hardcoded server key file");
     let server_id_pk = mldsa44::PublicKey::from_bytes(server_id_pk_bytes.as_slice())
         .expect("Failed to convert file to public key");
 
@@ -206,8 +206,59 @@ fn main() -> ResultIO<()> {
     let correct_cpk_spk = [client_pkey.as_bytes(), server_pkey].concat();
     assert!(cpk_spk == correct_cpk_spk, "Could not verify signature!");
 
-    
+    // Main message loop
+    let mut pt_msg = String::new();
+    let mut err_msg = String::new();
+    loop {
+        // Read msg from stdin
+        pt_msg.clear();
+        stdout().write(b"Type a message: ").unwrap();
+        match stdin().read_line(&mut pt_msg) {
+            Ok(_) => (),
+            Err(e) => {
+                err_msg = format!("Error reading stdin: {e}");
+                break;
+            }
+        };
 
-    // println!("Hello, world!");
-    Ok(())
+        // Client exit if typed "exit"
+        if pt_msg == "exit" {
+            break;
+        }
+
+        // Encrypt msg
+        let ct_msg_vec = match encrypt(pt_msg.trim_end().as_bytes()) {
+            Ok(ct) => ct,
+            Err(e) => {
+                err_msg = format!("Error reading stdin: {e}");
+                break;
+            }
+        };
+        
+        // Send the message
+        match write_socket(&mut socket, ct_msg_vec.as_slice()) {
+            Ok(_) => (),
+            Err(e) => {
+                err_msg = format!("Error reading stdin: {e}");
+                break;
+            }
+        }
+
+        // Await response
+        match read_socket(&mut socket) {
+            Ok(res) => println!("{}", String::from_utf8(res).unwrap()),
+            Err(e) => {
+                err_msg = format!("Error reading stdin: {e}");
+                break;
+            }
+        }
+    }
+
+    socket.shutdown(std::net::Shutdown::Both).unwrap();
+    if !err_msg.is_empty() {
+        Err(err_msg)
+    }
+    else {
+        Ok(())
+    }
 }
