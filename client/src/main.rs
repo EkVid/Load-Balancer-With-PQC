@@ -67,20 +67,12 @@ fn decrypt_fn(cipher: &Aes256Gcm, ciphertext: &[u8]) -> Result<Vec<u8>, ErrorAES
     cipher.decrypt(nonce, &ciphertext[12..])
 }
 
-// fn add_http_header(current: &mut String, field: &'static str, value: &String) {
-//     current.push_str(&format!("{field}: {value}\r\n"));
-// }
-
 /// Makes an HTTPS connection to domain
 fn do_https(domain: String, endpoint: String) {
     // The next 3 variables were borrowed from rustls documentation under "Getting started"
     // https://docs.rs/rustls/latest/rustls/
     let root_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    // Open self-signed cert to allow
-    // let cert = CertificateDer::from_pem_file("self_cert.pem").unwrap();
-    // root_store.add(cert).unwrap();
 
     let client_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
@@ -98,27 +90,29 @@ fn do_https(domain: String, endpoint: String) {
     let mut addrs = (domain.clone(), 443 as u16)
         .to_socket_addrs()
         .expect("Failed to convert domain to IP");
-    let sock_addr = addrs
-        .next()
-        .unwrap();
+    let sock_addr = addrs.next().unwrap();
     let mut sock = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(3))
         .expect("Failed to make socket");
-    sock.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    sock.set_write_timeout(Some(Duration::from_secs(10))).unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    sock.set_write_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
 
     let mut stream = rustls::Stream::new(&mut conn, &mut sock);
 
     // Setup HTTP headers for GET
     let headers = [
-        ("Accept",          "text/*; application/*; multipart/*".to_string()),
+        ("Accept", "text/*; application/*; multipart/*".to_string()),
         ("Accept-Encoding", "identity".to_string()),
         ("Accept-Language", "en-US".to_string()),
-        ("Connection",      "close".to_string()),
-        ("Host",            format!("{domain}:443")),
-        ("User-Agent",      "rust-socket".to_string())
+        ("Connection", "close".to_string()),
+        ("Host", format!("{domain}:443")),
+        ("User-Agent", "rust-socket".to_string()),
     ]
     .iter()
-    .fold(String::new(), |acc, tup| format!("{}{}: {}\r\n", acc, tup.0, tup.1));
+    .fold(String::new(), |acc, tup| {
+        format!("{}{}: {}\r\n", acc, tup.0, tup.1)
+    });
 
     // Format the HTTP GET request
     let mut req = format!("GET {endpoint} HTTP/1.1\r\n");
@@ -129,7 +123,8 @@ fn do_https(domain: String, endpoint: String) {
     print!("{}", req.clone());
 
     // Send the request
-    stream.write_all(req.as_bytes())
+    stream
+        .write_all(req.as_bytes())
         .expect("Failed to write to socket");
 
     println!("Sent request, now waiting response...\n");
@@ -143,7 +138,6 @@ fn do_https(domain: String, endpoint: String) {
             println!("ERR while reading response: {}", e.to_string())
         }
     }
-
 }
 
 fn main() -> Result<(), String> {
@@ -157,14 +151,19 @@ fn main() -> Result<(), String> {
 
     // Connect to server and set socket operation timeouts
     let mut socket = TcpStream::connect(&cli_args[1]).expect("Failed to open socket");
-    socket.set_read_timeout(Some(Duration::from_secs(3))).expect("Failed to set read timeout");
-    socket.set_write_timeout(Some(Duration::from_secs(3))).expect("Failed to set write timeout");
+    socket
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("Failed to set read timeout");
+    socket
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .expect("Failed to set write timeout");
 
     // Generate client eph keys
     let (client_pkey, client_skey) = keypair();
 
     // Send client public key to server
-    write_socket(&mut socket, &client_pkey.as_bytes()).expect("Failed to send our public key over socket");
+    write_socket(&mut socket, &client_pkey.as_bytes())
+        .expect("Failed to send our public key over socket");
 
     // Wait for server to respond
     // No cert:     pk2 + E(Sig(pk1 + pk2))
@@ -172,28 +171,28 @@ fn main() -> Result<(), String> {
 
     // Get shared key
     let server_pkey = &server_res[..public_key_bytes()];
-    let server_ct = Ciphertext::from_bytes(server_pkey)
-        .expect("Failed to convert server ct to Ciphertext");
+    let server_ct =
+        Ciphertext::from_bytes(server_pkey).expect("Failed to convert server ct to Ciphertext");
     let server_hello_data = &server_res[public_key_bytes()..];
 
     let shared_key = decapsulate(&server_ct, &client_skey);
     let shared_key = shared_key.as_bytes();
-    let cipher = Aes256Gcm::new_from_slice(shared_key)
-        .expect("Failed to create AesGcm cipher");
+    let cipher = Aes256Gcm::new_from_slice(shared_key).expect("Failed to create AesGcm cipher");
 
     // Create the encryption and decryption functions partially
     let encrypt = |plaintext: &[u8]| encrypt_fn(&cipher, plaintext);
     let decrypt = |ciphertext: &[u8]| decrypt_fn(&cipher, ciphertext);
 
     // Decrypt the data and verify signature
-    let server_sig = decrypt(server_hello_data)
-        .expect("Failed to decrypt hello");
+    let server_sig = decrypt(server_hello_data).expect("Failed to decrypt hello");
 
     // TODO: get server's permanent public key
-    let mut server_file = File::open("TODO_server_key.idk")
-        .expect("Failed to open server id public key file");
+    let mut server_file =
+        File::open("TODO_server_key.idk").expect("Failed to open server id public key file");
     let mut server_id_pk_bytes = Vec::new();
-    server_file.read_to_end(&mut server_id_pk_bytes).expect("Failed to read hardcoded server key file");
+    server_file
+        .read_to_end(&mut server_id_pk_bytes)
+        .expect("Failed to read hardcoded server key file");
     let server_id_pk = mldsa44::PublicKey::from_bytes(server_id_pk_bytes.as_slice())
         .expect("Failed to convert file to public key");
 
@@ -201,8 +200,7 @@ fn main() -> Result<(), String> {
         .expect("Failed to convert bytes to SignedMessage");
 
     // Verify signature
-    let cpk_spk = mldsa44::open(&sm, &server_id_pk)
-        .expect("Could not open signature!");
+    let cpk_spk = mldsa44::open(&sm, &server_id_pk).expect("Could not open signature!");
     let correct_cpk_spk = [client_pkey.as_bytes(), server_pkey].concat();
     assert!(cpk_spk == correct_cpk_spk, "Could not verify signature!");
 
@@ -234,7 +232,7 @@ fn main() -> Result<(), String> {
                 break;
             }
         };
-        
+
         // Send the message
         match write_socket(&mut socket, ct_msg_vec.as_slice()) {
             Ok(_) => (),
@@ -255,10 +253,10 @@ fn main() -> Result<(), String> {
     }
 
     socket.shutdown(std::net::Shutdown::Both).unwrap();
+
     if !err_msg.is_empty() {
         Err(err_msg)
-    }
-    else {
+    } else {
         Ok(())
     }
 }
