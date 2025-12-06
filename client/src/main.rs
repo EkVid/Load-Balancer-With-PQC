@@ -1,8 +1,7 @@
 use std::env::args;
 use std::fs::File;
 use std::io::{Read, Result as ResultIO, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::str::FromStr;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -109,43 +108,42 @@ fn do_https(domain: String, endpoint: String) {
 
     let mut stream = rustls::Stream::new(&mut conn, &mut sock);
 
-    // Write GET message to server
-    let mut req = format!("GET {endpoint} HTTP/1.1\r\n");
-    let host = {
-        if domain.chars().filter(|&c| c == '.').count() == 1 {
-            format!("www.{domain}:443")
-        }
-        else {
-            format!("{domain}:443")
-        }
-    };
-
+    // Setup HTTP headers for GET
     let headers = [
         ("Accept",          "*/*".to_string()),
         ("Accept-Encoding", "identity".to_string()),
         ("Accept-Language", "en-US".to_string()),
         ("Connection",      "close".to_string()),
-        ("Host",            host),
+        ("Host",            format!("{domain}:443")),
         ("User-Agent",      "rust-socket".to_string())
     ]
     .iter()
     .fold(String::new(), |acc, tup| format!("{}{}: {}\r\n", acc, tup.0, tup.1));
+
+    // Format the HTTP GET request
+    let mut req = format!("GET {endpoint} HTTP/1.1\r\n");
     req.push_str(&headers);
     req.push_str("\r\n");
 
     // Prints the HTTP request
     print!("{}", req.clone());
 
-    stream.write(req.as_bytes())
+    // Send the request
+    stream.write_all(req.as_bytes())
         .expect("Failed to write to socket");
 
     println!("Sent request, now waiting response...\n");
 
     // Read response
     let mut res = String::new();
-    stream.read_to_string(&mut res)
-        .expect("Failed to read socket");
-    print!("{}", res);
+    match stream.read_to_string(&mut res) {
+        Ok(_) => print!("{}", res),
+        Err(e) => {
+            println!("{}", res);
+            println!("ERR while reading response: {}", e.to_string())
+        }
+    }
+
 }
 
 fn main() -> ResultIO<()> {
