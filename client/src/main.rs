@@ -144,8 +144,27 @@ fn main() -> Result<(), String> {
     // Run with "cargo run <domain or IP+port> <endpoint>"
     let cli_args: Vec<String> = args().collect();
 
+    if cli_args.len() == 1 {
+        println!("Usage: cargo run <host> [endpoint]");
+        println!("Args:");
+        println!("  host        Domain name (ex: httpbin.io) or local IP address and port (ex: 127.0.0.1:3000)");
+        println!("  endpoint    If given external domain name, endpoint to GET (default is /)");
+        println!("Examples:");
+        println!("  cargo run httpbin.io");
+        println!("  cargo run www.randomnumberapi.com /api/v1.0/random?count=7");
+        println!("  cargo run 127.0.0.1:3000");
+        return Ok(());
+    }
+
     if !cli_args[1].contains(":") {
-        do_https(cli_args[1].clone(), cli_args[2].clone());
+        let endpoint = {
+            if cli_args.len() == 3 {
+                cli_args[2].clone()
+            } else {
+                "/".to_string()
+            }
+        };
+        do_https(cli_args[1].clone(), endpoint);
         return Ok(());
     }
 
