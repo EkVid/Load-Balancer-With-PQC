@@ -120,7 +120,7 @@ fn do_https(domain: String, endpoint: String) {
     req.push_str("\r\n");
 
     // Prints the HTTP request
-    print!("{}", req.clone());
+    print!("\n{}", req.clone());
 
     // Send the request
     stream
@@ -141,18 +141,17 @@ fn do_https(domain: String, endpoint: String) {
 }
 
 fn main() -> Result<(), String> {
-    // Run with "cargo run <domain or IP+port> <endpoint>"
     let cli_args: Vec<String> = args().collect();
 
     if cli_args.len() == 1 {
-        println!("Usage: cargo run <host> [endpoint]");
+        println!("Usage: client <host> [endpoint]");
         println!("Args:");
         println!("  host        Domain name (ex: httpbin.io) or local IP address and port (ex: 127.0.0.1:3000)");
         println!("  endpoint    If given external domain name, endpoint to GET (default is /)");
         println!("Examples:");
-        println!("  cargo run httpbin.io");
-        println!("  cargo run www.randomnumberapi.com /api/v1.0/random?count=7");
-        println!("  cargo run 127.0.0.1:3000");
+        println!("  client httpbin.io");
+        println!("  client www.randomnumberapi.com /api/v1.0/random?count=7");
+        println!("  client 127.0.0.1:3000");
         return Ok(());
     }
 
