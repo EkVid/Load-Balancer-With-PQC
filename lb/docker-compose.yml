@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  loadbalancer:
+    build: .
+    container_name: lb-server
+    ports:
+      - "7443:7443"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
