@@ -1,11 +1,10 @@
 use std::env::args;
-use std::fs::File;
-use std::io::{Read, Result as ResultIO, Write, stdin, stdout};
+use std::io::{Read, Result as ResultIO, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
-use pqcrypto::kem::mlkem512::{decapsulate, keypair, public_key_bytes};
+use pqcrypto::kem::mlkem512::{ciphertext_bytes, decapsulate, keypair};
 use pqcrypto::sign::mldsa44;
 use pqcrypto::traits::kem::{Ciphertext, PublicKey as KemPKey, SharedSecret};
 use pqcrypto::traits::sign::{PublicKey as SignPKey, SignedMessage};
@@ -151,7 +150,7 @@ fn main() -> Result<(), String> {
         println!("Examples:");
         println!("  client httpbin.io");
         println!("  client www.randomnumberapi.com /api/v1.0/random?count=7");
-        println!("  client 127.0.0.1:3000");
+        println!("  client 127.0.0.1:7443 /");
         return Ok(());
     }
 
@@ -176,105 +175,96 @@ fn main() -> Result<(), String> {
         .set_write_timeout(Some(Duration::from_secs(3)))
         .expect("Failed to set write timeout");
 
-    // Generate client eph keys
+    // Generate client public and secret keys with ML-KEM-512
     let (client_pkey, client_skey) = keypair();
 
-    // Send client public key to server
+    // Send client public key
     write_socket(&mut socket, &client_pkey.as_bytes())
         .expect("Failed to send our public key over socket");
 
-    // Wait for server to respond
-    // No cert:     pk2 + E(Sig(pk1 + pk2))
-    let server_res = read_socket(&mut socket).expect("Failed to get server hello from socket");
+    // Recieve: ciphertext (KEM) + server_public_key + signature (plaintext)
+    let server_res = read_socket(&mut socket)
+        .expect("Failed to read server response");
 
-    // Get shared key
-    let server_pkey = &server_res[..public_key_bytes()];
-    let server_ct =
-        Ciphertext::from_bytes(server_pkey).expect("Failed to convert server ct to Ciphertext");
-    let server_hello_data = &server_res[public_key_bytes()..];
+    // Parse the response components
+    let kem_ct_size = ciphertext_bytes();
+    let server_pubkey_size = 1312; // ML-DSA-44 public key size
 
+    // Extract components
+    let server_kem_ct = &server_res[..kem_ct_size];
+    let server_pubkey_bytes = &server_res[kem_ct_size..kem_ct_size + server_pubkey_size];
+    let signature = &server_res[kem_ct_size + server_pubkey_size..]; 
+
+    println!("KEM ciphertext: {} bytes", kem_ct_size);
+    println!("Server public key: {} bytes", server_pubkey_size);
+    println!("Signature: {} bytes", signature.len());
+
+    // Convert KEM ciphertext
+    let server_ct = Ciphertext::from_bytes(server_kem_ct)
+        .expect("Failed to convert server ct to Ciphertext");
+
+    // Derive shared key with server encapsulated key + client secret key
     let shared_key = decapsulate(&server_ct, &client_skey);
     let shared_key = shared_key.as_bytes();
-    let cipher = Aes256Gcm::new_from_slice(shared_key).expect("Failed to create AesGcm cipher");
+    
+    // Parse server's public key
+    let server_id_pk = mldsa44::PublicKey::from_bytes(server_pubkey_bytes)
+        .expect("Failed to parse server public key");
+    println!("Successfully parsed server public key");
 
-    // Create the encryption and decryption functions partially
+    println!("Verifying server signature...");
+
+    // signed data format: client_pubkey || server_kem_ct
+    let signed_data = [client_pkey.as_bytes(), server_kem_ct].concat();
+    
+    // ML-DSA SignedMessage format: signature || message
+    let mut signed_message_bytes = signature.to_vec();
+    signed_message_bytes.extend_from_slice(&signed_data);
+    
+    let signed_message = mldsa44::SignedMessage::from_bytes(&signed_message_bytes)
+        .expect("Failed to create signed message");
+
+    let verified_data = mldsa44::open(&signed_message, &server_id_pk)
+        .expect("Invalid server signature");
+
+    // Verify that the message extracted from the signature matches what we expect
+    if verified_data != signed_data {
+        panic!("Signature verification mismatch");
+    }
+
+    // Create cipher for application data encryption
+    let cipher = Aes256Gcm::new_from_slice(shared_key)
+        .expect("Failed to create AesGcm cipher");
+    
+    // Create encryption/decryption functions
     let encrypt = |plaintext: &[u8]| encrypt_fn(&cipher, plaintext);
     let decrypt = |ciphertext: &[u8]| decrypt_fn(&cipher, ciphertext);
 
-    // Decrypt the data and verify signature
-    let server_sig = decrypt(server_hello_data).expect("Failed to decrypt hello");
-
-    // TODO: get server's permanent public key
-    let mut server_file =
-        File::open("TODO_server_key.idk").expect("Failed to open server id public key file");
-    let mut server_id_pk_bytes = Vec::new();
-    server_file
-        .read_to_end(&mut server_id_pk_bytes)
-        .expect("Failed to read hardcoded server key file");
-    let server_id_pk = mldsa44::PublicKey::from_bytes(server_id_pk_bytes.as_slice())
-        .expect("Failed to convert file to public key");
-
-    let sm = mldsa44::SignedMessage::from_bytes(server_sig.as_slice())
-        .expect("Failed to convert bytes to SignedMessage");
-
-    // Verify signature
-    let cpk_spk = mldsa44::open(&sm, &server_id_pk).expect("Could not open signature!");
-    let correct_cpk_spk = [client_pkey.as_bytes(), server_pkey].concat();
-    assert!(cpk_spk == correct_cpk_spk, "Could not verify signature!");
-
-    // Main message loop
-    let mut pt_msg = String::new();
-    let mut err_msg = String::new();
-    loop {
-        // Read msg from stdin
-        pt_msg.clear();
-        stdout().write(b"Type a message: ").unwrap();
-        match stdin().read_line(&mut pt_msg) {
-            Ok(_) => (),
-            Err(e) => {
-                err_msg = format!("Error reading stdin: {e}");
-                break;
-            }
-        };
-
-        // Client exit if typed "exit"
-        if pt_msg == "exit" {
-            break;
-        }
-
-        // Encrypt msg
-        let ct_msg_vec = match encrypt(pt_msg.trim_end().as_bytes()) {
-            Ok(ct) => ct,
-            Err(e) => {
-                err_msg = format!("Error reading stdin: {e}");
-                break;
-            }
-        };
-
-        // Send the message
-        match write_socket(&mut socket, ct_msg_vec.as_slice()) {
-            Ok(_) => (),
-            Err(e) => {
-                err_msg = format!("Error reading stdin: {e}");
-                break;
-            }
-        }
-
-        // Await response
-        match read_socket(&mut socket) {
-            Ok(res) => println!("{}", String::from_utf8(res).unwrap()),
-            Err(e) => {
-                err_msg = format!("Error reading stdin: {e}");
-                break;
-            }
-        }
-    }
-
-    socket.shutdown(std::net::Shutdown::Both).unwrap();
-
-    if !err_msg.is_empty() {
-        Err(err_msg)
-    } else {
-        Ok(())
-    }
+    // Send HTTP request over encrypted channel
+    let endpoint = &cli_args[2];
+    let host = cli_args[1].split(':').next().unwrap_or("localhost");
+    
+    let http_request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: rust-pq-client\r\n\r\n",
+        endpoint, host
+    );
+    
+    println!("Sending HTTP request:\n{}", http_request);
+    
+    // Encrypt and send HTTP request via AES-GCM
+    let encrypted_request = encrypt(http_request.as_bytes())
+        .expect("Failed to encrypt request");
+    write_socket(&mut socket, &encrypted_request)
+        .expect("Failed to send encrypted request");
+    
+    // Receive and decrypt HTTP response via AES-GCM
+    let encrypted_response = read_socket(&mut socket)
+        .expect("Failed to read encrypted response");
+    let decrypted_response = decrypt(&encrypted_response)
+        .expect("Failed to decrypt response");
+    
+    let response_str = String::from_utf8_lossy(&decrypted_response);
+    println!("\nHTTP Response:\n{}", response_str);
+    
+    Ok(())
 }

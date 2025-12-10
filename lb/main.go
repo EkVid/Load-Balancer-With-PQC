@@ -8,6 +8,9 @@ import (
 	"sync"
 	"strconv"
 	"strings"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"lb/config"
 	"lb/models"
@@ -83,10 +86,29 @@ func main() {
 
 	// Handle graceful shutdown
 	var wg sync.WaitGroup
+	
+	// Create shutdown channel for custom TLS server
+	customTLSShutdown := make(chan struct{})
+	
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start Custom TLS Server on given port
+	if config.EnableCustomTLS {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("Starting Custom TLS server on port %d\n", config.CustomTLSPort)
+			if err := models.StartCustomTLSServer(config.CustomTLSPort, lb, customTLSShutdown); err != nil {
+				log.Printf("Custom TLS server failed: %v\n", err)
+			}
+		}()
+	}
 
 	// If HTTPS is enabled
 	if config.EnableHTTPS {
-		// Main HTTPS server with secure TLS configuration
+		// https server with tls configuration
 		httpsSrv := &http.Server{
 			Addr:      ":" + strconv.Itoa(config.HTTPSPort),
 			Handler:   lb,
@@ -95,7 +117,15 @@ func main() {
 
 		log.Printf("HTTPS Load Balancer started on :%d\n", config.HTTPSPort)
 
-		// Optional: Redirect HTTP to HTTPS
+		// Handle shutdown signal
+		go func() {
+			<-sigChan
+			log.Println("Received shutdown signal...")
+			close(customTLSShutdown)
+			httpsSrv.Close()
+		}()
+
+		// Redirect http to https
 		if config.RedirectHTTPToHTTPS {
 			httpSrv := &http.Server{
 				Addr: ":" + strconv.Itoa(config.HTTPPort),
@@ -132,13 +162,21 @@ func main() {
 			log.Fatalf("HTTPS server failed: %v\n", err)
 		}
 	} else {
-		// Main HTTP server (original behavior)
+		// http server (Austin's implementation)
 		srv := &http.Server{
 			Addr:    ":" + strconv.Itoa(lbPort),
 			Handler: lb,
 		}
 
 		log.Printf("HTTP Load Balancer started on :%d\n", lbPort)
+
+		// Handle shutdown signal
+		go func() {
+			<-sigChan
+			log.Println("Received shutdown signal...")
+			close(customTLSShutdown)
+			srv.Close()
+		}()
 
 		wg.Add(1)
 		go utils.GracefulShutdown(lb, srv, &wg)
