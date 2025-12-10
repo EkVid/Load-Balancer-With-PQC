@@ -127,42 +127,44 @@ func HandleClient(conn net.Conn, lb *LoadBalancer) {
         return
     }
 
-    // Generate shared secret, and encapsulate server key via client's public key
+    // Generate shared secret, and encapsulate secret via client's public key
     ct, sharedSecret, err := mlkem512.Scheme().Encapsulate(clientPubKey)
     if err != nil {
 		conn.Close()
         return
     }
 
-    // signature of clientPubKey + server kem
-    dataToSign := append(clientPubKeyBytes, ct...)
+    serverPubKeyBytes, _ := serverPublicKey.MarshalBinary()
+
+    // Signature of clientPubKey + serverPubKey + server eecapsulated secret
+    dataToSign := append(clientPubKeyBytes, serverPubKeyBytes...)
+    dataToSign = append(dataToSign, ct...)
     signature := mldsa44.Scheme().Sign(serverSigningKey, dataToSign, nil)
 
-    // send ciphertext + server public key + signature 
-    serverPubKeyBytes, _ := serverPublicKey.MarshalBinary()
-    response := append(ct, serverPubKeyBytes...)
-    response = append(response, signature...)
+    // Send back server public key + server encapsulated key + signature 
+    handshakeRes := append(serverPubKeyBytes, ct...)
+    handshakeRes = append(handshakeRes, signature...)
     
-    if err := writeSocket(conn, response); err != nil {
+    if err := writeSocket(conn, handshakeRes); err != nil {
 		conn.Close()
         return
     }
 
-    // recieve encrypted data using shared secret
+    // Recieve encrypted data using shared secret
     encryptedRequest, err := readSocket(conn)
     if err != nil {
 		conn.Close()
         return
     }
 
-    // decrypt request using shared secret
+    // Decrypt request using shared secret
     plainRequest, err := decrypt(sharedSecret, encryptedRequest)
     if err != nil {
 		conn.Close()
         return
     }
 
-    // convert to bufio format for http request
+    // Convert to bufio format for http request
     reader := bufio.NewReader(bytes.NewReader(plainRequest))
     httpReq, err := http.ReadRequest(reader)
     if err != nil {
@@ -170,7 +172,7 @@ func HandleClient(conn net.Conn, lb *LoadBalancer) {
         return
     }
 
-    // use custo ResponseWriter to capture response
+    // Use custo ResponseWriter to capture response
     customWriter := &customResponseWriter{
         header: make(http.Header),
         status: http.StatusOK,
@@ -178,7 +180,7 @@ func HandleClient(conn net.Conn, lb *LoadBalancer) {
     }
     lb.handleRequest(customWriter, httpReq)
 
-    // Step 10: Build HTTP response
+    // Build HTTP response
     var httpResponse strings.Builder
     httpResponse.WriteString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", customWriter.status, http.StatusText(customWriter.status)))
     for key, values := range customWriter.header {
@@ -187,7 +189,7 @@ func HandleClient(conn net.Conn, lb *LoadBalancer) {
     httpResponse.WriteString("\r\n")
     httpResponse.Write(customWriter.body.Bytes())
 
-    // Step 11: Encrypt and send response
+    // Encrypt and send response
     encryptedResponse, err := encrypt(sharedSecret, []byte(httpResponse.String()))
     if err != nil {
 		conn.Close()

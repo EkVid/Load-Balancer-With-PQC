@@ -190,36 +190,30 @@ fn main() -> Result<(), String> {
     let kem_ct_size = ciphertext_bytes();
     let server_pubkey_size = 1312; // ML-DSA-44 public key size
 
-    // Extract components
-    let server_kem_ct = &server_res[..kem_ct_size];
-    let server_pubkey_bytes = &server_res[kem_ct_size..kem_ct_size + server_pubkey_size];
-    let signature = &server_res[kem_ct_size + server_pubkey_size..]; 
+    // Extract components: server_pubkey + kem_ct + signature
+    let server_pubkey_bytes = &server_res[..server_pubkey_size];
+    let server_kem_ct = &server_res[server_pubkey_size..server_pubkey_size + kem_ct_size];
+    let signature = &server_res[server_pubkey_size + kem_ct_size..]; 
 
-    println!("KEM ciphertext: {} bytes", kem_ct_size);
-    println!("Server public key: {} bytes", server_pubkey_size);
-    println!("Signature: {} bytes", signature.len());
 
     // Convert KEM ciphertext
     let server_ct = Ciphertext::from_bytes(server_kem_ct)
         .expect("Failed to convert server ct to Ciphertext");
 
-    // Derive shared key with server encapsulated key + client secret key
-    let shared_key = decapsulate(&server_ct, &client_skey);
-    let shared_key = shared_key.as_bytes();
+    // Derive shared key with server encapsulated secret + client secret key
+    let shared_secret = decapsulate(&server_ct, &client_skey);
+    let shared_secret = shared_secret.as_bytes();
     
     // Parse server's public key
     let server_id_pk = mldsa44::PublicKey::from_bytes(server_pubkey_bytes)
         .expect("Failed to parse server public key");
-    println!("Successfully parsed server public key");
 
-    println!("Verifying server signature...");
-
-    // signed data format: client_pubkey || server_kem_ct
-    let signed_data = [client_pkey.as_bytes(), server_kem_ct].concat();
+    // signed data format: client_pubkey || server_pub_key || server_encapsulated_secret
+    let data_to_sign = [client_pkey.as_bytes(), server_pubkey_bytes, server_kem_ct].concat();
     
     // ML-DSA SignedMessage format: signature || message
     let mut signed_message_bytes = signature.to_vec();
-    signed_message_bytes.extend_from_slice(&signed_data);
+    signed_message_bytes.extend_from_slice(&data_to_sign);
     
     let signed_message = mldsa44::SignedMessage::from_bytes(&signed_message_bytes)
         .expect("Failed to create signed message");
@@ -228,12 +222,12 @@ fn main() -> Result<(), String> {
         .expect("Invalid server signature");
 
     // Verify that the message extracted from the signature matches what we expect
-    if verified_data != signed_data {
+    if verified_data != data_to_sign {
         panic!("Signature verification mismatch");
     }
 
     // Create cipher for application data encryption
-    let cipher = Aes256Gcm::new_from_slice(shared_key)
+    let cipher = Aes256Gcm::new_from_slice(shared_secret)
         .expect("Failed to create AesGcm cipher");
     
     // Create encryption/decryption functions
